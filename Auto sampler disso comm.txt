@@ -1,0 +1,91 @@
+Communication between Esp32 And RP PI  ------->
+
+                  COMMUNICATION CHANNEL - 1 (URAT-1)
+
+                   
+                           Recipe 
+      RP PI                                    ESP 32
+
+1.  #TS-03*                                #TS-03ACK*                    (Total no of step)
+2.  #RPM,1-100,2-150,3-300*                #RPM,1-100,2-150,3-300*       (RPM of each step)
+3.  #DUR,1-00:01,00:15,00:55*              #DUR,1-00:01,00:15,00:55,ACK* (Test duration of each step)
+4.  #SML,1-10,2-15,3-13*                   #SML,1-10,2-15,3-13,ACK*      (Sample amount of each step)
+5.  #FL-2ml*                               #FL-2ml,ACK*                  (Flush sample amount)
+
+                            TEST 
+      RP PI                                    ESP 32
+
+1.  #START-TEST*                           #START-TEST,ACK*              (start test)
+2.  #PAUSE-TEST*                           #PAUSE-TEST,ACK*              (pause test)
+3.  #STOP-TEST*                            #STOP-TEST,ACK*               (stop test)
+4. FEEDBACK FROM ESP WHEN TEST END<--------#END-TEST,ACK*
+
+                        HARDWARE CONTOL
+      RP PI                                    ESP 32 
+                         ARM MOTOR
+1.  #START-RPM-150*                        #START-RPM-150,ACK*           (start test) 
+2.  #STOP-RPM-150*                         #STOP-RPM-150*                (start test)
+                        LIFTTING-ARM
+3.  #LF-CU-UP*                             #LF-CU-UP,ACK*                (lifting column move up)       
+4.  #LF-CU-DOWN*                           #LF-CU-DOWN,ACK*              (lifting column move down)
+FEED BACK FROM ESP WHEN STIRREN REACH HOME<-(#LF-CL-HOME,ACK*) 
+5.  #LF-CU-STOP*                           #LF-CU-STOP,ACK*              (lifting column stop)
+
+                   SAMPLLING CLEANING CYCLE
+      RP PI                                    ESP 32
+
+ #CL,CH-A,5ml*                          #CL,CH-A,5ml,ACK*             (Cleaning channel-A tube volume )
+ #CL,CH-B,5ml*                          #CL,CH-B,5ml,ACK*             (Cleaning channel-B tube volume )
+ #CL,CH-C,5ml*                          #CL,CH-C,5ml,ACK*             (Cleaning channel-C tube volume )
+ #CL,CH-D,5ml*                          #CL,CH-D,5ml,ACK*             (Cleaning channel-D tube volume )
+ #CL,CH-D,5ml*                          #CL,CH-E,5ml,ACK*             (Cleaning ALL channel tube volume )
+ FEEDBACK FROM ESP WHEN CLEANING DONE<--#CL,CH-X,5ml,FSH,ACK*         
+
+
+
+                        
+                        CALIBRATION
+
+                   TEPERATURE CALIBRATION
+
+      RP PI                                    ESP 32
+
+#CAL,BT-36.5*                           #CAL,BT-36.5,ACK*                             
+#CAL,EXT-36.5*                          #CAL,EXT-36.5,ACK*
+#CAL,VSL1-36.5*                         #CAL,VSL1-36.5,ACK*
+#CAL,VSL2-36.5*                         #CAL,VSL2-36.5,ACK*
+#CAL,VSL3-36.5*                         #CAL,VSL3-36.5,ACK*
+#CAL,VSL4-36.5*                         #CAL,VSL4-36.5,ACK*
+#CAL,VSL5-36.5*                         #CAL,VSL5-36.5,ACK*
+#CAL,VSL6-36.5*                         #CAL,VSL6-36.5,ACK*
+                       
+
+                  SMAPLE VOLUME CALIBRATION
+
+#CAL,TSML-VL*                            #CAL,TSML-VL,ACK*
+FEEDBACK FROM ESP WHEN IT'S READY FOR CAL <--#ENT-TSML-VL,ACK*
+#CAL,TSML-24.1*                          #CAL,TSML-24.1,ACK*
+
+
+
+
+                  COMMUNICATION CHANNEL - 2 (URAT-2)
+  
+                   TEMPERATURE & STATUES UPDATE
+.                                          (BATH,EXT,VSL-1,VSL-2,VSL-3,VSL-4,VSL-5,VSL-6)                    
+#TEMP*                                  #36.5,30.2,26.1,27.2,29.1,26.5,28.2,26.2*
+#TEMP-A-1SEC*                           #36.5,30.2,26.1,27.2,29.1,26.5,28.2,26.2*
+#STATUES*                               #IDEL* / #TEST-RUNNING,ST-03/07,00:05:00/00:04:30*
+
+
+
+
+
+
+
+
+                         
+
+
+
+ 

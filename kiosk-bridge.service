@@ -1,0 +1,30 @@
+[Unit]
+Description=Tablet Hardness Tester kiosk API (Flask)
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=rle
+Group=rle
+Environment=PYTHONUNBUFFERED=1
+Environment=INTERNAL_USB_PATH=/media/usb_internal
+Environment=STORAGE_DIR=/media/usb_internal/storage
+Environment=REPORTS_DIR=/media/usb_internal/reports
+Environment=AUDIT_DB_DIR=/media/usb_internal/db
+Environment=INTERNAL_USB_UUIDS=9588114d-4b26-4aaa-b664-05ef9e4a68dc
+WorkingDirectory=/opt/kiosk
+
+# Free stale listeners on Flask port before bind (Harmless if nothing holds the port.)
+ExecStartPre=/opt/kiosk/scripts/kiosk_pre_start_port.sh
+
+ExecStart=/opt/kiosk/run_hardness_bridge.sh
+Restart=always
+RestartSec=3
+
+# Logs (rle-owned path; avoids permission issues with /var/log)
+StandardOutput=append:/home/rle/kiosk_bridge.log
+StandardError=append:/home/rle/kiosk_bridge.log
+
+[Install]
+WantedBy=multi-user.target

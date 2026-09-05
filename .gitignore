@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime / local data
+logs/
+*.log
+uart_communications.log
+db/*.db
+db/*.db-*
+storage/current_user.json
+storage/session_power_audit_pending.json
+storage/test_run.json
+storage/app_clean_stop.flag
+storage/audit_export*.json
+reports/*.pdf
+reports/*_thermal.txt
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+System Volume Information/
+.git.corrupt/
+.idea/
+.vscode/
+
+# Env secrets
+.env
+.env.local

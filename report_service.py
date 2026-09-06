@@ -498,6 +498,14 @@ def get_report_preview_data(report: Dict[str, Any]) -> Dict[str, Any]:
             runs = td.get("validationRuns")
         if runs:
             preview["validationRuns"] = runs
+    try:
+        import print_service
+
+        preview["a4Text"] = print_service.format_for_a4_printer(
+            report, include_printed_timestamp=False
+        ).rstrip("\n")
+    except Exception:
+        preview["a4Text"] = ""
     return preview
 
 

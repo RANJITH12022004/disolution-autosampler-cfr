@@ -560,8 +560,10 @@ function isEditableTarget(el) {
 }
 
 function isDissolutionTestActive() {
+    // Lock navigation only after Start (running / paused).
+    // Preheat and "recipe loaded but not started" must allow free navigation.
     var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
-    if (dt && (dt.running || dt.paused || dt.preheating)) return true;
+    if (dt && (dt.running || dt.paused)) return true;
     try {
         if (window._dissoServerRunActive === true) return true;
     } catch (e) { /* ignore */ }
@@ -1412,13 +1414,19 @@ function isCurrentUserReportOperator(preview) {
 }
 
 function isReportPreviewLockedForCurrentUser(preview) {
-    if (typeof isFactorySessionUser === 'function' && isFactorySessionUser()) return false;
+    // Hard-lock the operator on pending test/validation/calibration reports until approved.
+    // No Factory bypass: Factory can approve to unlock, but cannot navigate away unapproved.
     var p = preview || window._lastReportPreview || {};
     var reportTypeNorm = String(p.type || 'test').trim().toLowerCase();
     if (reportTypeNorm !== 'test' && reportTypeNorm !== 'validation' && reportTypeNorm !== 'calibration') {
         return false;
     }
     if (!isReportPendingApproval(p)) return false;
+    var rid = currentReportId != null ? currentReportId : (p.id != null ? p.id : null);
+    var gate = window._reportApprovalGate;
+    if (gate && gate.reportId != null && rid != null && String(gate.reportId) === String(rid)) {
+        return true;
+    }
     return isCurrentUserReportOperator(p);
 }
 
@@ -1443,11 +1451,20 @@ function setReportApprovalGateFromPreview(preview, reportId) {
         clearReportApprovalGate();
         return;
     }
-    if (isReportPreviewLockedForCurrentUser(preview)) {
+    var reportTypeNorm = String((preview || {}).type || 'test').trim().toLowerCase();
+    var isApprovalType = reportTypeNorm === 'test' || reportTypeNorm === 'validation' ||
+        reportTypeNorm === 'calibration';
+    // Gate for the operator (including Factory) so exit stays blocked until approve.
+    if (isApprovalType && isCurrentUserReportOperator(preview)) {
         setReportApprovalGate(reportId, getReportOperatedByUsername(preview));
-    } else {
-        clearReportApprovalGate();
+        return;
     }
+    // Keep an existing gate for this same pending report (finish/abort path).
+    var gate = window._reportApprovalGate;
+    if (gate && gate.reportId != null && reportId != null && String(gate.reportId) === String(reportId)) {
+        return;
+    }
+    clearReportApprovalGate();
 }
 
 function stopReportApprovalPoll() {
@@ -1655,17 +1672,23 @@ function stampOperatorOnTestReportPayload(payload) {
 }
 
 function abortPendingReportOnLogout() {
+    // Pending approval reports must not be cleared on logout; logout is blocked while locked.
     var gate = window._reportApprovalGate;
     if (!gate || gate.reportId == null) return Promise.resolve();
-    if (typeof isFactorySessionUser === 'function' && isFactorySessionUser()) {
-        clearReportApprovalGate();
-        return Promise.resolve();
+    return Promise.resolve();
+}
+
+/** Close / leave report preview only when not hard-locked for approval. */
+function leaveReportPreviewIfAllowed() {
+    if (typeof isReportPreviewLockedForCurrentUser === 'function' &&
+        isReportPreviewLockedForCurrentUser(window._lastReportPreview)) {
+        showAppModal(
+            'This report is awaiting approval. You must stay on the report screen until a reviewer approves it.',
+            'Report'
+        );
+        return;
     }
-    return apiRequest(API_BASE + '/api/data/reports/' + gate.reportId + '/abort', { method: 'POST' }).then(function () {
-        clearReportApprovalGate();
-    }).catch(function () {
-        clearReportApprovalGate();
-    });
+    goToPage('reports');
 }
 
 /** Always open preview and apply pending approval gate when applicable. */
@@ -1980,8 +2003,9 @@ function autoLogoutTick() {
 }
 
 function performAutoLogoutDueToInactivity() {
-    var pendingGate = window._reportApprovalGate && window._reportApprovalGate.reportId != null &&
-        !(typeof isFactorySessionUser === 'function' && isFactorySessionUser());
+    var pendingLocked = (typeof isReportPreviewLockedForCurrentUser === 'function' &&
+        isReportPreviewLockedForCurrentUser(window._lastReportPreview)) ||
+        (window._reportApprovalGate && window._reportApprovalGate.reportId != null);
     var finish = function () {
         auditExitActiveScreenBeforeSessionEnd()
             .then(flushAuditEventQueue)
@@ -2000,7 +2024,7 @@ function performAutoLogoutDueToInactivity() {
                 }, 200);
             });
     };
-    if (pendingGate) {
+    if (pendingLocked) {
         markAutoLogoutActivity();
         return;
     }
@@ -2739,7 +2763,7 @@ function goBack() {
     } else if (pageId === 'page-create-recipe-step2') {
         goToPage('create-recipe-step1');
     } else if (pageId === 'page-report-preview') {
-        goToPage('reports');
+        leaveReportPreviewIfAllowed();
     } else if (pageId === 'page-recipe-print-preview') {
         goToPage('view-recipes');
     } else if (pageId === 'page-view-recipes') {
@@ -2879,8 +2903,9 @@ function logout() {
         (typeof isTemperatureCalibrationActive === 'function' && isTemperatureCalibrationActive()) ||
         (validationRunState === 'running') ||
         (validationRunBackendPending === true);
-    var pendingGate = window._reportApprovalGate && window._reportApprovalGate.reportId != null &&
-        !(typeof isFactorySessionUser === 'function' && isFactorySessionUser());
+    var pendingGate = (typeof isReportPreviewLockedForCurrentUser === 'function' &&
+            isReportPreviewLockedForCurrentUser(window._lastReportPreview)) ||
+        (window._reportApprovalGate && window._reportApprovalGate.reportId != null);
 
     var doLogout = function () {
         abortPendingReportOnLogout().then(function () {
@@ -4164,7 +4189,7 @@ function startRpmValidationLive() {
 function initRpmValidationPage() {
     var targetEl = document.getElementById('rpm-val-target');
     if (targetEl) {
-        if (!targetEl.value || targetEl.value === '') targetEl.value = '50';
+        targetEl.value = '';
         targetEl.disabled = false;
     }
     var tachEl = document.getElementById('rpm-val-tachometer');
@@ -4732,7 +4757,7 @@ function resetRpmValidation() {
     }
     var target = document.getElementById('rpm-val-target');
     var tach = document.getElementById('rpm-val-tachometer');
-    if (target) target.value = '50';
+    if (target) target.value = '';
     if (tach) tach.value = '';
     _rpmValLive = null;
     _rpmValResetShaftButtons();
@@ -7089,7 +7114,12 @@ function openReportPreview(reportId, options) {
             currentReportId = reportId;
             currentReportData = null;
             populateReportPreview(data.preview);
-            setReportApprovalGateFromPreview(data.preview, reportId);
+            if (options.setGate && isReportPendingApproval(data.preview)) {
+                var forceOp = getReportOperatedByUsername(data.preview) || getCurrentReportUsername();
+                setReportApprovalGate(reportId, forceOp);
+            } else {
+                setReportApprovalGateFromPreview(data.preview, reportId);
+            }
             applyReportPreviewLockUi(data.preview);
             goToPage('report-preview');
             resetReportPreviewScroll();
@@ -7141,292 +7171,15 @@ function formatReportDate(isoStr) {
 
 function populateReportPreview(preview) {
     if (!preview) return;
-    var reportType = preview.type || 'test';
-    var isValidationOrCalibration = (reportType === 'validation' || reportType === 'calibration');
-    var valCalSection = document.getElementById('report-validation-calibration-section');
-    var testSections = document.getElementById('report-test-sections');
-    if (valCalSection) valCalSection.style.display = isValidationOrCalibration ? 'block' : 'none';
-    if (testSections) testSections.style.display = isValidationOrCalibration ? 'none' : 'block';
-
-    var recipe = preview.recipe || (preview.testData && preview.testData.recipe) || preview.testData || {};
-    var fs = preview.factorySettings || {};
-    var td = preview.testData || preview;
-
-    setReportEl('report-company-name', fs.companyName);
-    setReportEl('report-model-no', fs.modelNo);
-    setReportEl('report-serial-no', fs.serialNo);
-    setReportEl('report-location', fs.companyLocation || fs.location);
-    setReportEl('report-instrument-no', fs.instrumentId);
-    setReportEl('report-previous-val', fs.lastValidationDate);
-    setReportEl('report-next-validation', fs.nextValidationDate);
-
-    if (reportType === 'validation' || reportType === 'calibration') {
-        var titleEl = document.getElementById('report-validation-calibration-title');
-        var bodyEl = document.getElementById('report-validation-calibration-body');
-        if (titleEl) {
-            titleEl.textContent = reportType === 'calibration' ? 'CALIBRATION DETAILS' : 'VALIDATION DETAILS';
-        }
-        if (bodyEl) {
-            var subtype = String(
-                td.validationSubtype || td.calibrationSubtype ||
-                preview.validationSubtype || preview.calibrationSubtype || ''
-            ).toLowerCase();
-            var startDateStr = formatReportDate(
-                td.validationStartTime || td.calibrationStartTime || td.testStartTime ||
-                preview.validationStartTime || preview.calibrationStartTime || preview.createdAt
-            );
-            var dateStr = formatReportDate(
-                td.validationEndTime || td.calibrationEndTime || td.testEndTime || td.completedAt ||
-                preview.completedAt || preview.createdAt
-            );
-            var status = td.status || preview.status || '--';
-            var rows = [];
-            rows.push('<tr><th>Start Time</th><td colspan="3">' + startDateStr + '</td></tr>');
-            rows.push('<tr><th>End Time</th><td colspan="3">' + dateStr + '</td></tr>');
-
-            if (subtype === 'combined' || subtype === 'suite') {
-                rows.push('<tr><th>Type</th><td>Combined Suite</td><th>Overall</th><td>' + status + '</td></tr>');
-                var runs = td.validationRuns || preview.validationRuns || [];
-                if (Array.isArray(runs)) {
-                    runs.forEach(function (run) {
-                        if (!run) return;
-                        var st = String(run.validationSubtype || '').toLowerCase();
-                        var stLabel = st === 'sample_volume' || st === 'sample-volume' ? 'Sample Volume'
-                            : st === 'physical' ? 'Physical Parameters'
-                            : st === 'rpm' ? 'RPM'
-                            : st === 'temperature' ? 'Temperature'
-                            : (st || 'Step');
-                        var stStatus = run.status || '--';
-                        rows.push('<tr><th>' + stLabel + '</th><td colspan="3">' + stStatus + '</td></tr>');
-                        if (st === 'temperature') {
-                            rows.push('<tr><th>Bath</th><td>' + (run.bath != null ? run.bath : '--') +
-                                '</td><th>External</th><td>' + (run.external != null ? run.external : '--') + '</td></tr>');
-                            rows.push('<tr><th>Measured</th><td colspan="3">' + (run.measured != null ? run.measured : '--') + ' °C</td></tr>');
-                        } else if (st === 'rpm') {
-                            rows.push('<tr><th>Target</th><td>' + (run.rpm != null ? run.rpm : '--') +
-                                '</td><th>Tachometer</th><td>' + (run.tachometerRpm != null ? run.tachometerRpm : run.currentRpm != null ? run.currentRpm : '--') + '</td></tr>');
-                        } else if (st === 'sample_volume' || st === 'sample-volume') {
-                            rows.push('<tr><th>Target</th><td>' + (run.sampleVolumeTarget != null ? run.sampleVolumeTarget : '--') +
-                                '</td><th>Tolerance</th><td>± ' + (run.sampleVolumeTolerance != null ? run.sampleVolumeTolerance : '--') + '</td></tr>');
-                            rows.push('<tr><th>Measured</th><td colspan="3">' + (run.sampleVolumeMeasured != null ? run.sampleVolumeMeasured : '--') + ' mL</td></tr>');
-                        } else if (st === 'physical') {
-                            rows.push('<tr><th>Acknowledged</th><td colspan="3">' + (run.acknowledged ? 'Yes' : 'No') + '</td></tr>');
-                        }
-                    });
-                }
-            } else if (reportType === 'calibration' && (subtype === 'temperature' || !subtype)) {
-                rows.push('<tr><th>Type</th><td>Temperature Calibration</td><th>Status</th><td>' + status + '</td></tr>');
-                var calChannels = td.temperatureChannels || preview.temperatureChannels || [];
-                if (Array.isArray(calChannels) && calChannels.length) {
-                    calChannels.forEach(function (ch) {
-                        var label = (ch && ch.label) ? ch.label : '--';
-                        var live = (ch && ch.live != null) ? Number(ch.live).toFixed(1) : '--';
-                        var actual = (ch && ch.actual != null) ? Number(ch.actual).toFixed(1)
-                            : ((ch && ch.reference != null) ? Number(ch.reference).toFixed(1) : '--');
-                        rows.push('<tr><th>' + label + '</th><td colspan="3">Live ' + live + ' / Actual ' + actual + ' °C</td></tr>');
-                    });
-                }
-            } else if (reportType === 'calibration' && (subtype === 'sample-volume' || subtype === 'sample_volume')) {
-                rows.push('<tr><th>Type</th><td>Sample Volume Calibration</td><th>Status</th><td>' + status + '</td></tr>');
-                var svVal = td.sampleVolumeActual != null ? td.sampleVolumeActual : preview.sampleVolumeActual;
-                rows.push('<tr><th>Actual (mL)</th><td colspan="3">' + (svVal != null ? svVal : '--') + '</td></tr>');
-            } else if (subtype === 'temperature') {
-                var tolerance = td.tolerance != null ? td.tolerance : preview.tolerance;
-                rows.push('<tr><th>Type</th><td>Temperature</td><th>Status</th><td>' + status + '</td></tr>');
-                rows.push('<tr><th>Tolerance (± °C)</th><td colspan="3">' + (tolerance != null ? tolerance : '--') + '</td></tr>');
-                var channels = td.temperatureChannels || preview.temperatureChannels || [];
-                if (Array.isArray(channels) && channels.length) {
-                    channels.forEach(function (ch) {
-                        var label = (ch && ch.label) ? ch.label : '--';
-                        var live = (ch && ch.live != null) ? Number(ch.live).toFixed(1) : '--';
-                        var ref = (ch && ch.reference != null) ? Number(ch.reference).toFixed(1) : '--';
-                        var dlt = (ch && ch.delta != null)
-                            ? ((Number(ch.delta) >= 0 ? '+' : '') + Number(ch.delta).toFixed(2))
-                            : '--';
-                        rows.push('<tr><th>' + label + '</th><td colspan="3">Live ' + live + ' / Ref ' + ref + ' / Δ ' + dlt + '</td></tr>');
-                    });
-                }
-            } else if (subtype === 'rpm') {
-                var rpmTarget = td.rpm != null ? td.rpm : preview.rpm;
-                var rpmLive = td.currentRpm != null ? td.currentRpm : preview.currentRpm;
-                var rpmDelta = td.delta != null ? td.delta : preview.delta;
-                var rpmLiveDisp = (rpmLive != null && !isNaN(Number(rpmLive)))
-                    ? (typeof formatHardwareRpmDisplay === 'function' ? formatHardwareRpmDisplay(rpmLive) : Number(rpmLive).toFixed(1))
-                    : '--';
-                var rpmDeltaDisp = (rpmDelta != null && !isNaN(Number(rpmDelta)))
-                    ? ((Number(rpmDelta) >= 0 ? '+' : '') + Number(rpmDelta).toFixed(2))
-                    : '--';
-                rows.push('<tr><th>Type</th><td>RPM</td><th>Status</th><td>' + status + '</td></tr>');
-                rows.push('<tr><th>Target RPM</th><td colspan="3">' + (rpmTarget != null ? rpmTarget : '--') + '</td></tr>');
-                rows.push('<tr><th>Live RPM</th><td>' + rpmLiveDisp + '</td><th>Δ vs target</th><td>' + rpmDeltaDisp + '</td></tr>');
-            } else if (subtype === 'sample-volume' || subtype === 'sample_volume') {
-                var svTarget = td.sampleVolumeTarget != null ? td.sampleVolumeTarget : preview.sampleVolumeTarget;
-                var svTol = td.sampleVolumeTolerance != null ? td.sampleVolumeTolerance : preview.sampleVolumeTolerance;
-                var svMeasured = td.sampleVolumeMeasured != null ? td.sampleVolumeMeasured : preview.sampleVolumeMeasured;
-                var svDelta = td.delta != null ? td.delta : preview.delta;
-                var svPass = td.sampleVolumePass != null ? td.sampleVolumePass : preview.sampleVolumePass;
-                var svPassLabel = svPass === true ? 'Pass' : (svPass === false ? 'Fail' : '--');
-                var svDeltaDisp = (svDelta != null && !isNaN(Number(svDelta)))
-                    ? ((Number(svDelta) >= 0 ? '+' : '') + Number(svDelta).toFixed(2))
-                    : '--';
-                rows.push('<tr><th>Type</th><td>Sample Volume</td><th>Status</th><td>' + status + '</td></tr>');
-                rows.push('<tr><th>Target (mL)</th><td>' + (svTarget != null ? svTarget : '--') + '</td><th>Tolerance (± mL)</th><td>' + (svTol != null ? svTol : '--') + '</td></tr>');
-                rows.push('<tr><th>Measured (mL)</th><td>' + (svMeasured != null ? svMeasured : '--') + '</td><th>Δ vs target</th><td>' + svDeltaDisp + '</td></tr>');
-                rows.push('<tr><th>Channel</th><td>Sample volume</td><th>Result</th><td>' + svPassLabel + '</td></tr>');
-            } else {
-                rows.push('<tr><th>Type</th><td>' + (td.usp || subtype || (reportType === 'calibration' ? 'Calibration' : 'Validation')) + '</td><th>Status</th><td>' + status + '</td></tr>');
-            }
-            bodyEl.innerHTML = rows.join('');
-        }
-    }
-
-    setReportEl('report-product-name', recipe.productName || td.productName);
-    var batchDisplay = recipe.batchNumber || td.batchNumber || '';
-    if (!batchDisplay && (td.batchNumber1 || td.batchNumber2 || recipe.batchNumber1 || recipe.batchNumber2)) {
-        var b1 = td.batchNumber1 || recipe.batchNumber1 || '--';
-        var b2 = td.batchNumber2 || recipe.batchNumber2 || '';
-        batchDisplay = b2 ? ('D1: ' + b1 + ' | D2: ' + b2) : b1;
-    }
-    setReportEl('report-batch-number', batchDisplay || '--');
-
-    var startRaw = td.testStartTime || td.validationStartTime || preview.validationStartTime || preview.createdAt;
-    var startStr = formatReportDate(startRaw);
-    var startParts = String(startStr || '').split(/\s+/);
-    var startDateOnly = startParts[0] || '--';
-    var startTimeOnly = startParts.length > 1 ? startParts.slice(1).join(' ') : '--';
-    setReportEl('report-test-date', startDateOnly);
-    setReportEl('report-test-time', startTimeOnly);
-    setReportEl('report-recipe-no', recipe.productName || recipe.name || td.productName || '--');
-    setReportEl('report-test-method', td.usp || td.uspMode || recipe.usp || recipe.uspMode || '--');
-    var setTempVal = (td.temperature != null ? td.temperature : recipe.temperature);
-    setReportEl('report-set-temp', setTempVal != null ? (Number(setTempVal).toFixed ? Number(setTempVal).toFixed(1) + ' C' : setTempVal + ' C') : '--');
-    setReportEl('report-sample-drop', td.mode || recipe.mode || '--');
-    var sc = (td.stepCount != null ? td.stepCount : (td.steps && td.steps.length ? td.steps.length : (recipe.steps && recipe.steps.length ? recipe.steps.length : null)));
-    setReportEl('report-total-steps', sc != null ? sc : '--');
-    setReportEl('report-media-volume', td.mediaVolume || recipe.mediaVolume || '--');
-    setReportEl('report-media-ph', (td.mediaPh != null ? td.mediaPh : (recipe.mediaPh != null ? recipe.mediaPh : '--')));
-
-    var durationSec = td.durationSeconds;
-    var durationStr = '--';
-    if (durationSec != null && durationSec >= 0) {
-        if (typeof formatSecondsAsHhMmSs === 'function') durationStr = formatSecondsAsHhMmSs(durationSec);
-        else durationStr = durationSec + ' s';
-    } else if (preview.reportDerived && preview.reportDerived.durationFormatted) {
-        durationStr = preview.reportDerived.durationFormatted;
-    }
-    setReportEl('report-test-duration', durationStr);
-    var cs = (td.completedSteps != null ? td.completedSteps : null);
-    var statusLabel = (td.status === 'aborted' ? 'Aborted' : 'Completed');
-    if (cs != null && sc != null) statusLabel = statusLabel + ' (' + cs + '/' + sc + ' steps)';
-    setReportEl('report-test-status', statusLabel);
-    var doneTitle = document.getElementById('report-test-completed-title');
-    if (doneTitle) doneTitle.textContent = (td.status === 'aborted') ? 'TEST ABORTED' : 'TEST COMPLETED';
-
-    // Two-column step details
-    var stepBody = document.getElementById('report-step-details-body');
-    if (stepBody) {
-        var stepsMeta = td.steps || recipe.steps || [];
-        if (!Array.isArray(stepsMeta)) stepsMeta = [];
-        var mid = Math.ceil(stepsMeta.length / 2);
-        var stepRows = [];
-        for (var si = 0; si < mid; si++) {
-            var left = stepsMeta[si] || {};
-            var right = stepsMeta[si + mid] || null;
-            var lDur = left.durationHms || left.setTime || left.duration || left.time || '--';
-            if (lDur === '--' && left.durationSeconds != null) {
-                lDur = (typeof formatSecondsAsHhMmSs === 'function')
-                    ? formatSecondsAsHhMmSs(left.durationSeconds) : String(left.durationSeconds);
-            }
-            var rHtml = '<td></td><td></td><td></td>';
-            if (right) {
-                var rDur = right.durationHms || right.setTime || right.duration || right.time || '--';
-                if (rDur === '--' && right.durationSeconds != null) {
-                    rDur = (typeof formatSecondsAsHhMmSs === 'function')
-                        ? formatSecondsAsHhMmSs(right.durationSeconds) : String(right.durationSeconds);
-                }
-                rHtml = '<td>' + (si + mid + 1) + '</td><td>' + (right.rpm != null ? right.rpm : '--') +
-                    '</td><td>' + rDur + '</td>';
-            }
-            stepRows.push(
-                '<tr><td>' + (si + 1) + '</td><td>' + (left.rpm != null ? left.rpm : '--') +
-                '</td><td>' + lDur + '</td>' + rHtml + '</tr>'
-            );
-        }
-        stepBody.innerHTML = stepRows.length ? stepRows.join('') : '<tr><td colspan="6">No steps</td></tr>';
-    }
-
-    var tbody = document.getElementById('report-test-data-body');
-    var headerRow = document.getElementById('report-test-data-header');
-    if (headerRow) {
-        headerRow.innerHTML =
-            '<th>Sl.No.</th>' +
-            '<th>Time</th>' +
-            '<th>RPM</th>' +
-            '<th>Set Temp.</th>' +
-            '<th>Bath Temp.</th>' +
-            '<th>Deviation</th>';
-    }
-    if (tbody) {
-        var tempLog = td.tempLog || preview.tempLog || [];
-        var rows = [];
-        if (Array.isArray(tempLog) && tempLog.length) {
-            tempLog.forEach(function (row, idx) {
-                if (!row) return;
-                var t = row.time || '--';
-                if (String(t).indexOf('T') >= 0) {
-                    try {
-                        var d = new Date(t);
-                        if (!isNaN(d.getTime())) {
-                            t = String(d.getHours()).padStart(2, '0') + ':' +
-                                String(d.getMinutes()).padStart(2, '0') + ':' +
-                                String(d.getSeconds()).padStart(2, '0');
-                        }
-                    } catch (e) {}
-                }
-                var setT = row.setTemp != null ? Number(row.setTemp).toFixed(1) : '--';
-                var bathT = row.bathTemp != null ? Number(row.bathTemp).toFixed(1) : '--';
-                var dev = row.deviation;
-                var devS = '--';
-                if (dev != null && !isNaN(Number(dev))) {
-                    var dv = Number(dev);
-                    devS = (dv >= 0 ? '+' : '') + dv.toFixed(1);
-                }
-                rows.push(
-                    '<tr>' +
-                        '<td>' + String(idx + 1).padStart(3, '0') + '</td>' +
-                        '<td>' + t + '</td>' +
-                        '<td>' + (row.rpm != null ? row.rpm : '--') + '</td>' +
-                        '<td>' + setT + '</td>' +
-                        '<td>' + bathT + '</td>' +
-                        '<td>' + devS + '</td>' +
-                    '</tr>'
-                );
-            });
+    var a4Pre = document.getElementById('report-a4-pre');
+    if (a4Pre) {
+        var a4 = preview.a4Text;
+        if (a4 == null || String(a4).trim() === '') {
+            a4Pre.textContent = 'Report text unavailable.';
         } else {
-            rows.push('<tr><td colspan="6">No temperature log recorded</td></tr>');
+            a4Pre.textContent = String(a4);
         }
-        tbody.innerHTML = rows.join('');
     }
-
-    var remarksEl = document.getElementById('report-remarks-box');
-    if (remarksEl) {
-        var approvalRemarks = preview.approvalRemarks;
-        var reportRemarks = preview.remarks || td.remarks || '';
-        remarksEl.textContent = (approvalRemarks != null && String(approvalRemarks).trim() !== '')
-            ? approvalRemarks
-            : (reportRemarks || '____________________');
-    }
-
-    setReportEl('report-operated-by', preview.operatorName || td.operatorName || '--');
-    setReportEl('report-employee-id', preview.employeeId || td.employeeId || '--');
-    var passFail = preview.approvalPassFail || td.approvalPassFail || '';
-    setReportEl('report-approval-result', passFail || '--');
-    setReportEl('report-approved-by', formatApprovedByLine(preview.approvedBy || '--'));
-    setReportEl('report-approved-at', preview.approvedAt ? formatReportDate(preview.approvedAt) : '--');
-
-    var derived = preview.reportDerived || {};
-    setReportEl('report-printed-date', derived.printDate || '--');
-    setReportEl('report-printed-time', derived.printTime || '--');
 
     window._lastReportPreview = preview;
     if (currentReportId != null && typeof buildReportPrintPayload === 'function') {
@@ -9622,7 +9375,7 @@ function selectSystemSettingCard(btn) {
     var group = btn.getAttribute('data-group');
     var value = btn.getAttribute('data-value');
     if (!group) return;
-    document.querySelectorAll('.sys-set-card[data-group="' + group + '"]').forEach(function (el) {
+    document.querySelectorAll('.system-settings-page [data-group="' + group + '"]').forEach(function (el) {
         el.classList.toggle('is-selected', el === btn);
     });
     if (group === 'beep') {
@@ -9636,7 +9389,7 @@ function selectSystemSettingCard(btn) {
 }
 
 function _sysApplyCardGroup(group, value) {
-    var cards = document.querySelectorAll('.sys-set-card[data-group="' + group + '"]');
+    var cards = document.querySelectorAll('.system-settings-page [data-group="' + group + '"]');
     var matched = false;
     cards.forEach(function (el) {
         var on = el.getAttribute('data-value') === String(value);
@@ -11414,36 +11167,12 @@ function initSystemInfoPage() {
     loadSystemInfo();
 }
 
-var _hwInitTimers = [];
 var _hwInitAborted = false;
-
-function _hwInitClearTimers() {
-    _hwInitTimers.forEach(function (id) { clearTimeout(id); });
-    _hwInitTimers = [];
-}
-
-function _hwInitSetMod(id, stateText, ok) {
-    var li = document.getElementById(id);
-    if (!li) return;
-    var st = li.querySelector('.hw-init-mod-state');
-    if (st) st.textContent = stateText;
-    li.classList.toggle('is-ok', !!ok);
-    li.classList.toggle('is-active', !ok && stateText === 'Checking…');
-}
-
-function _hwInitShowViz(which) {
-    var lift = document.getElementById('hw-init-viz-lift');
-    var paddle = document.getElementById('hw-init-viz-paddle');
-    var rotor = document.getElementById('hw-init-paddle-rotor');
-    if (lift) lift.classList.toggle('is-active', which === 'lift');
-    if (paddle) paddle.classList.toggle('is-active', which === 'paddle');
-    if (rotor) rotor.classList.toggle('is-spinning', which === 'paddle');
-}
+var _hwInitBusy = false;
 
 function cleanupHardwareInitOnLeave() {
     _hwInitAborted = true;
-    _hwInitClearTimers();
-    _hwInitShowViz('lift');
+    _hwInitBusy = false;
 }
 
 function openHardwareInitPage() {
@@ -11454,96 +11183,81 @@ function openHardwareInitPage() {
     goToPage('hardware-init');
 }
 
-function initHardwareInitPage() {
-    _hwInitAborted = false;
-    _hwInitClearTimers();
+function _hwInitSetUi(phaseText, detailText, opts) {
+    opts = opts || {};
     var phase = document.getElementById('hw-init-phase');
     var detail = document.getElementById('hw-init-detail');
-    var success = document.getElementById('hw-init-success');
+    var startBtn = document.getElementById('hw-init-start-btn');
     var doneBtn = document.getElementById('hw-init-done-btn');
-    if (phase) phase.textContent = 'Preparing…';
-    if (detail) detail.textContent = 'Sending initialise in 5 seconds';
-    if (success) success.hidden = true;
-    if (doneBtn) doneBtn.disabled = true;
-    ['hw-init-mod-init', 'hw-init-mod-m1', 'hw-init-mod-m2', 'hw-init-mod-m3', 'hw-init-mod-m4'].forEach(function (id) {
-        _hwInitSetMod(id, 'Pending', false);
-    });
-    _hwInitShowViz('lift');
-
-    _hwInitTimers.push(setTimeout(function () {
-        if (_hwInitAborted) return;
-        if (phase) phase.textContent = 'Initialising…';
-        if (detail) detail.textContent = 'Sending #INIT* to ESP';
-        if (typeof apiRequest !== 'function') {
-            if (phase) phase.textContent = 'Failed';
-            if (detail) detail.textContent = 'API unavailable';
-            if (doneBtn) doneBtn.disabled = false;
-            return;
-        }
-        apiRequest(API_BASE + '/api/hardware/disso/init', { method: 'POST', body: {} })
-            .then(function (result) {
-                if (_hwInitAborted) return;
-                if (result && result.ok !== false && !result.error) {
-                    if (phase) phase.textContent = 'Initialized OK';
-                    if (detail) detail.textContent = 'Command acknowledged. Checking modules…';
-                    _hwInitSetMod('hw-init-mod-init', 'OK', true);
-                    _hwInitRunModuleSequence();
-                } else {
-                    if (phase) phase.textContent = 'Failed';
-                    if (detail) detail.textContent = (result && result.error) || 'Hardware initialise failed.';
-                    if (doneBtn) doneBtn.disabled = false;
-                }
-            })
-            .catch(function (err) {
-                if (_hwInitAborted) return;
-                var msg = (err && err.message) ? err.message : 'Hardware initialise request failed.';
-                if (err && err.body && err.body.error) msg = err.body.error;
-                if (phase) phase.textContent = 'Failed';
-                if (detail) detail.textContent = msg;
-                if (doneBtn) doneBtn.disabled = false;
-            });
-    }, 5000));
+    var band = document.getElementById('hw-init-status-band');
+    if (phase) phase.textContent = phaseText || 'Ready';
+    if (detail) detail.textContent = detailText || '';
+    if (band) {
+        band.classList.toggle('is-busy', !!opts.busy);
+        band.classList.toggle('is-ok', !!opts.ok);
+        band.classList.toggle('is-fail', !!opts.fail);
+    }
+    if (startBtn) startBtn.disabled = !!opts.disableStart;
+    if (doneBtn) doneBtn.disabled = opts.enableDone ? false : true;
 }
 
-function _hwInitRunModuleSequence() {
-    var steps = [
-        { id: 'hw-init-mod-m1', viz: 'lift', label: 'M1 OK' },
-        { id: 'hw-init-mod-m2', viz: 'paddle', label: 'M2 OK' },
-        { id: 'hw-init-mod-m3', viz: 'lift', label: 'M3 OK' },
-        { id: 'hw-init-mod-m4', viz: 'lift', label: 'M4 OK' }
-    ];
-    var i = 0;
-    function next() {
-        if (_hwInitAborted) return;
-        if (i >= steps.length) {
-            var phase = document.getElementById('hw-init-phase');
-            var detail = document.getElementById('hw-init-detail');
-            var success = document.getElementById('hw-init-success');
-            var doneBtn = document.getElementById('hw-init-done-btn');
-            if (phase) phase.textContent = 'Initialisation Success';
-            if (detail) detail.textContent = 'All modules reported OK';
-            if (success) success.hidden = false;
-            if (doneBtn) doneBtn.disabled = false;
-            _hwInitShowViz('lift');
-            if (typeof logAuditEvent === 'function') {
-                logAuditEvent('Hardware initialised', 'INIT ACK + M1–M4 OK', {
-                    eventType: 'lifecycle', entityType: 'settings'
+function initHardwareInitPage() {
+    _hwInitAborted = false;
+    _hwInitBusy = false;
+    _hwInitSetUi('Ready', 'Press Initialize to send #INIT* to the ESP.', {
+        disableStart: false,
+        enableDone: false
+    });
+}
+
+function startHardwareInitialise() {
+    if (_hwInitBusy) return;
+    if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
+        showAppModal('Finish or abort the dissolution test before initialising hardware.', 'Hardware Initialise');
+        return;
+    }
+    _hwInitBusy = true;
+    _hwInitAborted = false;
+    _hwInitSetUi('Initializing…', 'Waiting for #INIT,ACK* from ESP.', {
+        busy: true,
+        disableStart: true,
+        enableDone: false
+    });
+    if (typeof apiRequest !== 'function') {
+        _hwInitBusy = false;
+        _hwInitSetUi('Failed', 'API unavailable', { fail: true, disableStart: false, enableDone: true });
+        return;
+    }
+    apiRequest(API_BASE + '/api/hardware/disso/init', { method: 'POST', body: {} })
+        .then(function (result) {
+            if (_hwInitAborted) return;
+            _hwInitBusy = false;
+            if (result && result.ok !== false && !result.error) {
+                _hwInitSetUi('Initialized', 'Initialisation done.', {
+                    ok: true,
+                    disableStart: false,
+                    enableDone: true
+                });
+                if (typeof logAuditEvent === 'function') {
+                    logAuditEvent('Hardware initialised', 'INIT ACK', {
+                        eventType: 'lifecycle', entityType: 'settings'
+                    });
+                }
+            } else {
+                _hwInitSetUi('Failed', (result && result.error) || 'Hardware initialise failed.', {
+                    fail: true,
+                    disableStart: false,
+                    enableDone: true
                 });
             }
-            return;
-        }
-        var step = steps[i++];
-        _hwInitShowViz(step.viz);
-        _hwInitSetMod(step.id, 'Checking…', false);
-        _hwInitTimers.push(setTimeout(function () {
+        })
+        .catch(function (err) {
             if (_hwInitAborted) return;
-            _hwInitSetMod(step.id, 'OK', true);
-            var detail = document.getElementById('hw-init-detail');
-            if (detail) detail.textContent = step.label;
-            _hwInitTimers.push(setTimeout(next, 400));
-        }, 1200));
-    }
-    next();
+            _hwInitBusy = false;
+            var msg = (err && err.message) ? err.message : 'Hardware initialise request failed.';
+            if (err && err.body && err.body.error) msg = err.body.error;
+            _hwInitSetUi('Failed', msg, { fail: true, disableStart: false, enableDone: true });
+        });
 }
 
 function confirmHardwareInitialise() {

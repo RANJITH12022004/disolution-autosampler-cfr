@@ -973,148 +973,10 @@
                 <div class="page" id="page-report-preview">
                     <div class="reports-container" style="overflow-y: auto;">
                         <div id="report-pending-lock-banner" class="report-pending-lock-banner" style="display: none;"><strong>Awaiting approval.</strong> A Reviewer or Admin must complete Pass/Fail and sign below. You cannot leave, log out, or open Profile until the report is approved.</div>
-                        <div class="report-preview-container report-print-template" id="report-content">
-                            <h1>RAISE LAB EQUIPMENT</h1>
-                            <h2>DISSOLUTION TESTER - TEST REPORT</h2>
-                            <h2 id="report-company-name">COMPANY NAME</h2>
-                            <table class="report-ident-table">
-                                <tr>
-                                    <th>Model No</th>
-                                    <td id="report-model-no"></td>
-                                    <th>Serial No</th>
-                                    <td id="report-serial-no"></td>
-                                </tr>
-                                <tr>
-                                    <th>Location</th>
-                                    <td id="report-location"></td>
-                                    <th>Instrument No</th>
-                                    <td id="report-instrument-no"></td>
-                                </tr>
-                                <tr>
-                                    <th>Last Validation Date</th>
-                                    <td id="report-previous-val"></td>
-                                    <th>Next Validation Due</th>
-                                    <td id="report-next-validation"></td>
-                                </tr>
-                            </table>
-                            <!-- Validation details (shown only for validation reports) -->
-                            <div id="report-validation-calibration-section" style="display: none;">
-                                <h3 id="report-validation-calibration-title">VALIDATION DETAILS</h3>
-                                <table class="report-ident-table" id="report-validation-calibration-table">
-                                    <tbody id="report-validation-calibration-body"></tbody>
-                                </table>
+                        <div class="report-preview-container report-print-template report-a4-preview" id="report-content">
+                            <div class="report-a4-paper" aria-label="A4 report preview">
+                                <pre id="report-a4-pre" class="report-a4-pre">Loading report…</pre>
                             </div>
-                            <div id="report-test-sections">
-                                <h3>TEST DETAILS</h3>
-                                <table class="report-info-table">
-                                    <tr>
-                                        <th>TEST DATE</th>
-                                        <td id="report-test-date"></td>
-                                        <th>TIME</th>
-                                        <td id="report-test-time"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>RECIPE NO.</th>
-                                        <td id="report-recipe-no" colspan="3"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>TEST METHOD</th>
-                                        <td id="report-test-method"></td>
-                                        <th>SET TEMP</th>
-                                        <td id="report-set-temp"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>SAMPLE DROP</th>
-                                        <td id="report-sample-drop" colspan="3"></td>
-                                    </tr>
-                                </table>
-                                <h3>PRODUCT DETAILS</h3>
-                                <table class="report-info-table">
-                                    <tr>
-                                        <th>PRODUCT NAME</th>
-                                        <td id="report-product-name" colspan="3"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>BATCH NUMBER</th>
-                                        <td id="report-batch-number" colspan="3"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>TOTAL STEPS NO</th>
-                                        <td id="report-total-steps"></td>
-                                        <th>MEDIA VOLUME</th>
-                                        <td id="report-media-volume"></td>
-                                    </tr>
-                                    <tr>
-                                        <th>MEDIA PH</th>
-                                        <td id="report-media-ph" colspan="3"></td>
-                                    </tr>
-                                </table>
-                                <h3>STEP DETAILS</h3>
-                                <table class="report-test-data-table" id="report-step-details-table">
-                                    <thead>
-                                        <tr>
-                                            <th>STEP</th>
-                                            <th>RPM</th>
-                                            <th>DURATION</th>
-                                            <th>STEP</th>
-                                            <th>RPM</th>
-                                            <th>DURATION</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="report-step-details-body"></tbody>
-                                </table>
-                                <h3>Comments</h3>
-                                <div class="report-remarks-box" id="report-remarks-box"></div>
-                                <h3>TEST RESULTS</h3>
-                                <table class="report-test-data-table" id="report-test-data-table">
-                                    <thead>
-                                        <tr id="report-test-data-header">
-                                            <th>Sl.No.</th>
-                                            <th>Time</th>
-                                            <th>RPM</th>
-                                            <th>Set Temp.</th>
-                                            <th>Bath Temp.</th>
-                                            <th>Deviation</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="report-test-data-body"></tbody>
-                                </table>
-                                <h3 id="report-test-completed-title">TEST COMPLETED</h3>
-                                <table class="report-info-table">
-                                    <tr>
-                                        <th>TOTAL TEST DURATION</th>
-                                        <td id="report-test-duration"></td>
-                                        <th>TEST STATUS</th>
-                                        <td id="report-test-status"></td>
-                                    </tr>
-                                </table>
-                            </div>
-                            <table class="report-approval-table">
-                                <tr>
-                                    <th>Operated By</th>
-                                    <td id="report-operated-by"></td>
-                                    <th>Employee ID</th>
-                                    <td id="report-employee-id"></td>
-                                </tr>
-                                <tr>
-                                    <th>Result</th>
-                                    <td id="report-approval-result"></td>
-                                    <th>Approved By</th>
-                                    <td id="report-approved-by"></td>
-                                </tr>
-                                <tr>
-                                    <th>Approved At</th>
-                                    <td id="report-approved-at" colspan="3"></td>
-                                </tr>
-                            </table>
-                            <table class="report-info-table" id="report-printed-stamp" style="margin-top: 12px;">
-                                <tr>
-                                    <th>Printed Date</th>
-                                    <td id="report-printed-date"></td>
-                                    <th>Printed Time</th>
-                                    <td id="report-printed-time"></td>
-                                </tr>
-                            </table>
                             <div id="report-approve-panel" class="report-approve-panel" style="display: none;">
                                 <h3 id="report-approve-panel-title">Test report approval</h3>
                                 <p class="section-subtitle">Reviewer or Admin: select Pass or Fail and add approval remarks.</p>
@@ -1173,7 +1035,7 @@
                                 <button class="btn-print" onclick="handlePrintReport()">Print A4</button>
                                 <button class="btn-export" onclick="handleExportReport()">Export to USB</button>
                             </div>
-                            <button class="btn-close" onclick="goToPage('reports')">Close</button>
+                            <button class="btn-close" onclick="leaveReportPreviewIfAllowed()">Close</button>
                         </div>
                     </div>
                 </div>
@@ -1382,34 +1244,36 @@
 
                                 <div class="page" id="page-rpm-validation">
                     <div class="rpm-val-page rpm-val-page--suite">
-                        <p class="rpm-val-lead">Set target RPM, then Start Validation. Measure with a tachometer during the 1-minute timer.</p>
                         <div class="rpm-val-main">
-                            <div class="rpm-val-target-block">
+                            <section class="rpm-val-target-block">
                                 <label for="rpm-val-target">Target RPM</label>
                                 <div class="rpm-val-input-row">
-                                    <input type="number" id="rpm-val-target" class="input-field rpm-val-input-lg" min="1" max="300" step="1"
-                                        value="50" inputmode="numeric"
+                                    <input type="number" id="rpm-val-target" class="input-field rpm-val-input-compact" min="1" max="300" step="1"
+                                        value="" placeholder="—" inputmode="numeric"
                                         aria-label="Target RPM"
                                         onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                                     <span class="rpm-val-unit" aria-hidden="true">RPM</span>
                                 </div>
                                 <input type="hidden" id="rpm-val-tachometer" value="">
-                            </div>
-                            <div class="rpm-val-timer-block" id="rpm-val-timer-block" aria-live="polite">
+                                <p class="rpm-val-field-hint">Enter target, then Start Validation.</p>
+                            </section>
+                            <section class="rpm-val-timer-block" id="rpm-val-timer-block" aria-live="polite">
                                 <div class="rpm-val-timer-label">Validation timer</div>
                                 <div class="rpm-val-timer" id="rpm-val-timer">01:00</div>
                                 <div class="rpm-val-timer-hint" id="rpm-val-timer-hint">Press Start Validation to begin</div>
-                            </div>
-                            <div class="rpm-val-shaft-compact" aria-label="Shaft position">
-                                <div class="rpm-val-section-label">Shaft</div>
-                                <div class="rpm-val-shaft-controls rpm-val-shaft-row" role="group">
-                                    <button type="button" class="dt-stirrer-btn dt-stirrer-up" id="rpm-val-shaft-up" onclick="rpmValShaftCommand('up')"><span class="dt-stirrer-btn-label">Up</span></button>
-                                    <button type="button" class="dt-stirrer-btn dt-stirrer-stop is-active" id="rpm-val-shaft-stop" onclick="rpmValShaftCommand('stop')"><span class="dt-stirrer-btn-label">Stop</span></button>
-                                    <button type="button" class="dt-stirrer-btn dt-stirrer-down" id="rpm-val-shaft-down" onclick="rpmValShaftCommand('down')"><span class="dt-stirrer-btn-label">Down</span></button>
-                                </div>
+                            </section>
+                        </div>
+                        <section class="rpm-val-shaft-compact" aria-label="Shaft position">
+                            <div class="rpm-val-shaft-head">
+                                <span class="rpm-val-section-label">Shaft position</span>
                                 <div class="rpm-val-shaft-status">Status: <strong id="rpm-val-shaft-status">Stopped</strong></div>
                             </div>
-                        </div>
+                            <div class="rpm-val-shaft-controls rpm-val-shaft-row" role="group">
+                                <button type="button" class="rpm-val-shaft-btn rpm-val-shaft-up" id="rpm-val-shaft-up" onclick="rpmValShaftCommand('up')">Up</button>
+                                <button type="button" class="rpm-val-shaft-btn rpm-val-shaft-stop is-active" id="rpm-val-shaft-stop" onclick="rpmValShaftCommand('stop')">Stop</button>
+                                <button type="button" class="rpm-val-shaft-btn rpm-val-shaft-down" id="rpm-val-shaft-down" onclick="rpmValShaftCommand('down')">Down</button>
+                            </div>
+                        </section>
                         <div class="rpm-val-footer-actions">
                             <button type="button" class="btn btn-primary rpm-val-btn-lg" id="rpm-val-primary-btn" onclick="onRpmValidationPrimary()">Start Validation</button>
                             <button type="button" class="btn btn-primary rpm-val-btn-lg" id="rpm-val-next-btn" onclick="onRpmValidationNext()" disabled>Next</button>
@@ -1704,30 +1568,28 @@
                 </div>
 
                 <div class="page" id="page-sample-volume-validation">
-                    <div class="add-member-container sv-val-page sv-val-page--suite" style="max-width: 640px; margin: 0 auto;">
-                        <h2 class="section-title">Sample Volume Validation</h2>
-                        <p class="section-subtitle">Set target and tolerance, then Start. When the sampler is ready, enter the measured volume.</p>
-
+                    <div class="sv-val-page sv-val-page--suite">
+                        <div class="sv-val-hero">
+                            <p class="sv-val-lead">Set target and tolerance, then Start. When the sampler is ready, enter the measured volume.</p>
+                        </div>
                         <div class="sv-val-form-grid">
-                            <div class="form-group">
+                            <div class="sv-val-field">
                                 <label for="sv-val-target">Target Volume (mL)</label>
-                                <input type="number" id="sv-val-target" class="input-field" min="0.1" max="1000" step="0.1"
+                                <input type="number" id="sv-val-target" class="input-field sv-val-input" min="0.1" max="1000" step="0.1"
                                     value="10" placeholder="e.g. 10"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
-                            <div class="form-group">
+                            <div class="sv-val-field">
                                 <label for="sv-val-tolerance">Tolerance (± mL)</label>
-                                <input type="number" id="sv-val-tolerance" class="input-field" min="0" max="500" step="0.1"
+                                <input type="number" id="sv-val-tolerance" class="input-field sv-val-input" min="0" max="500" step="0.1"
                                     value="10" placeholder="e.g. 10"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                         </div>
-
                         <p class="sv-val-status-line" id="sv-val-status" aria-live="polite">Ready</p>
-
-                        <div class="add-member-actions members-actions-row val-suite-actions" style="margin-top: 20px;">
-                            <button type="button" class="btn btn-primary" id="sv-val-primary-btn" onclick="onSampleVolumeValidationPrimary()">Start</button>
-                            <button type="button" class="btn btn-primary" id="sv-val-next-btn" onclick="onSampleVolumeValidationNext()" disabled>Next</button>
+                        <div class="sv-val-footer-actions val-suite-actions">
+                            <button type="button" class="btn btn-primary sv-val-btn" id="sv-val-primary-btn" onclick="onSampleVolumeValidationPrimary()">Start</button>
+                            <button type="button" class="btn btn-primary sv-val-btn" id="sv-val-next-btn" onclick="onSampleVolumeValidationNext()" disabled>Next</button>
                         </div>
                     </div>
                 </div>
@@ -1897,34 +1759,45 @@
                 <!-- Test Settings (instrument configuration) -->
                 <div class="page" id="page-system-settings">
                     <div class="system-settings-page">
-                        <section class="sys-set-section" aria-label="Beep">
-                            <h3 class="sys-set-section-title">Beep</h3>
-                            <div class="sys-set-cards" role="group" aria-label="Beep setting">
-                                <button type="button" class="sys-set-card is-selected" id="sys-beep-enable"
-                                    data-group="beep" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
-                                <button type="button" class="sys-set-card" id="sys-beep-disable"
-                                    data-group="beep" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
-                            </div>
-                            <input type="hidden" id="sys-beep" value="Enable">
-                        </section>
+                        <div class="sys-set-panel">
+                            <section class="sys-set-section" aria-label="Beep">
+                                <div class="sys-set-row">
+                                    <div class="sys-set-copy">
+                                        <h3 class="sys-set-section-title">Beep</h3>
+                                        <p class="sys-set-note">Audible feedback during operations</p>
+                                    </div>
+                                    <div class="sys-set-seg" role="group" aria-label="Beep setting">
+                                        <button type="button" class="sys-set-seg-btn is-selected" id="sys-beep-enable"
+                                            data-group="beep" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
+                                        <button type="button" class="sys-set-seg-btn" id="sys-beep-disable"
+                                            data-group="beep" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="sys-beep" value="Enable">
+                            </section>
 
-                        <section class="sys-set-section" aria-label="Temperature tolerance">
-                            <h3 class="sys-set-section-title">Temperature Tolerance</h3>
-                            <div class="sys-set-cards" role="group" aria-label="Temperature tolerance setting">
-                                <button type="button" class="sys-set-card" id="sys-temp-tol-enable"
-                                    data-group="tempTolerance" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
-                                <button type="button" class="sys-set-card is-selected" id="sys-temp-tol-disable"
-                                    data-group="tempTolerance" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
-                            </div>
-                            <input type="hidden" id="sys-temp-tolerance" value="Disable">
-                            <div class="system-settings-tolerance-value-wrap" id="sys-temp-tolerance-value-wrap" hidden>
-                                <label for="sys-temp-tolerance-value">Tolerance (°C)</label>
-                                <input type="number" id="sys-temp-tolerance-value" class="input-field"
-                                    min="0.1" max="10" step="0.1" placeholder="e.g. 0.5"
-                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
-                            </div>
-                        </section>
-
+                            <section class="sys-set-section" aria-label="Temperature tolerance">
+                                <div class="sys-set-row">
+                                    <div class="sys-set-copy">
+                                        <h3 class="sys-set-section-title">Temperature Tolerance</h3>
+                                        <p class="sys-set-note">Enforce bath / vessel tolerance band</p>
+                                    </div>
+                                    <div class="sys-set-seg" role="group" aria-label="Temperature tolerance setting">
+                                        <button type="button" class="sys-set-seg-btn" id="sys-temp-tol-enable"
+                                            data-group="tempTolerance" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
+                                        <button type="button" class="sys-set-seg-btn is-selected" id="sys-temp-tol-disable"
+                                            data-group="tempTolerance" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="sys-temp-tolerance" value="Disable">
+                                <div class="system-settings-tolerance-value-wrap" id="sys-temp-tolerance-value-wrap" hidden>
+                                    <label for="sys-temp-tolerance-value">Tolerance (°C)</label>
+                                    <input type="number" id="sys-temp-tolerance-value" class="input-field sys-set-tol-input"
+                                        min="0.1" max="10" step="0.1" placeholder="e.g. 0.5"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                </div>
+                            </section>
+                        </div>
                         <div class="sys-set-footer">
                             <button type="button" class="btn btn-primary" id="sys-settings-save-btn"
                                 onclick="saveSystemSettings()">Save</button>
@@ -2135,13 +2008,15 @@
                 <!-- IP Config — LAN / WLAN (no sign-in) -->
                 <div class="page" id="page-ip-config">
                     <div class="ip-config-page">
-                        <p class="ip-config-lead">Network addresses for this device on the local network.</p>
-                        <div id="ip-configure-list" class="ip-configure-list" aria-live="polite">
-                            <div class="ip-configure-loading">Loading addresses…</div>
-                        </div>
-                        <div class="ip-config-actions">
-                            <button type="button" class="btn btn-primary btn-refresh-ip-configure"
-                                onclick="refreshIpConfigureAddresses()">Refresh</button>
+                        <div class="ip-config-card">
+                            <p class="ip-config-lead">Network addresses for this device on the local network.</p>
+                            <div id="ip-configure-list" class="ip-configure-list" aria-live="polite">
+                                <div class="ip-configure-loading">Loading addresses…</div>
+                            </div>
+                            <div class="ip-config-actions">
+                                <button type="button" class="btn btn-primary btn-refresh-ip-configure"
+                                    onclick="refreshIpConfigureAddresses()">Refresh</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2159,54 +2034,17 @@
                 <!-- Hardware Initialise wizard -->
                 <div class="page" id="page-hardware-init">
                     <div class="hw-init-page">
-                        <div class="hw-init-status-band" id="hw-init-status-band" aria-live="polite">
-                            <div class="hw-init-phase" id="hw-init-phase">Preparing…</div>
-                            <div class="hw-init-detail" id="hw-init-detail">Waiting before sending initialise command</div>
-                        </div>
-                        <div class="hw-init-body">
-                            <div class="hw-init-viz" id="hw-init-viz" aria-hidden="true">
-                                <div class="hw-init-viz-lift is-active" id="hw-init-viz-lift">
-                                    <div class="hw-init-lift-column"></div>
-                                    <div class="hw-init-lift-label">Lifting column</div>
-                                </div>
-                                <div class="hw-init-viz-paddle" id="hw-init-viz-paddle">
-                                    <div class="dt-paddle-rotor hw-init-paddle-rotor" id="hw-init-paddle-rotor">
-                                        <svg class="dt-pdl-shaft" viewBox="0 0 48 48" width="64" height="64" aria-hidden="true">
-                                            <circle cx="24" cy="24" r="6" fill="currentColor" opacity="0.9"/>
-                                            <rect x="22" y="4" width="4" height="40" rx="1" fill="currentColor"/>
-                                            <path class="dt-pdl-blade" d="M8 22 h12 v4 H8 z M28 22 h12 v4 H28 z" fill="currentColor"/>
-                                        </svg>
-                                    </div>
-                                    <div class="hw-init-lift-label">Paddles</div>
-                                </div>
+                        <div class="hw-init-card">
+                            <div class="hw-init-status-band" id="hw-init-status-band" aria-live="polite">
+                                <div class="hw-init-phase" id="hw-init-phase">Ready</div>
+                                <div class="hw-init-detail" id="hw-init-detail">Press Initialize to send #INIT* to the ESP.</div>
                             </div>
-                            <ul class="hw-init-modules" id="hw-init-modules">
-                                <li class="hw-init-mod" data-mod="init" id="hw-init-mod-init">
-                                    <span class="hw-init-mod-name">Initialised</span>
-                                    <span class="hw-init-mod-state" id="hw-init-mod-init-state">Pending</span>
-                                </li>
-                                <li class="hw-init-mod" data-mod="m1" id="hw-init-mod-m1">
-                                    <span class="hw-init-mod-name">M1 · Lifting column</span>
-                                    <span class="hw-init-mod-state">Pending</span>
-                                </li>
-                                <li class="hw-init-mod" data-mod="m2" id="hw-init-mod-m2">
-                                    <span class="hw-init-mod-name">M2 · Paddles</span>
-                                    <span class="hw-init-mod-state">Pending</span>
-                                </li>
-                                <li class="hw-init-mod" data-mod="m3" id="hw-init-mod-m3">
-                                    <span class="hw-init-mod-name">M3 · Reserved</span>
-                                    <span class="hw-init-mod-state">Pending</span>
-                                </li>
-                                <li class="hw-init-mod" data-mod="m4" id="hw-init-mod-m4">
-                                    <span class="hw-init-mod-name">M4 · Reserved</span>
-                                    <span class="hw-init-mod-state">Pending</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div class="hw-init-success" id="hw-init-success" hidden>Initialisation Success</div>
-                        <div class="hw-init-actions">
-                            <button type="button" class="btn btn-secondary" id="hw-init-done-btn"
-                                onclick="goToPage('settings')" disabled>Done</button>
+                            <div class="hw-init-actions">
+                                <button type="button" class="btn btn-primary hw-init-primary-btn" id="hw-init-start-btn"
+                                    onclick="startHardwareInitialise()">Initialize</button>
+                                <button type="button" class="btn btn-secondary" id="hw-init-done-btn"
+                                    onclick="goToPage('settings')" disabled>Done</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2223,69 +2061,59 @@
 
                         <div id="sysinfo-error" class="sysinfo-error" style="display: none;" role="alert"></div>
 
-                        <div class="sysinfo-grid">
-                            <!-- Thermal Diagnostics Panel -->
-                            <section class="sysinfo-card sysinfo-thermal-card" aria-label="Temperatures">
-                                <div class="sysinfo-card-header">
-                                    <h3 class="sysinfo-card-title">Temperatures</h3>
-                                </div>
-                                <div class="sysinfo-thermal-body">
-                                    <div class="sysinfo-hero-temp">
-                                        <div class="sysinfo-temp-badge bath">
-                                            <span class="sysinfo-temp-label">Bath</span>
-                                            <span class="sysinfo-bath-value" id="sysinfo-bath">—</span>
-                                        </div>
-                                        <div class="sysinfo-temp-badge ext">
-                                            <span class="sysinfo-temp-label">External</span>
-                                            <span class="sysinfo-ext-value" id="sysinfo-ext">—</span>
-                                        </div>
+                        <div class="sysinfo-bands">
+                            <section class="sysinfo-band sysinfo-band-temps" aria-label="Temperatures">
+                                <div class="sysinfo-band-title">Temperatures</div>
+                                <div class="sysinfo-hero-temp">
+                                    <div class="sysinfo-temp-badge bath">
+                                        <span class="sysinfo-temp-label">Bath</span>
+                                        <span class="sysinfo-bath-value" id="sysinfo-bath">—</span>
                                     </div>
-                                    <div class="sysinfo-vessel-section">
-                                        <span class="sysinfo-sub-label">Vessels</span>
-                                        <div class="sysinfo-vessel-row" aria-label="Vessel temperatures">
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 1</span><span class="sysinfo-vessel-val" id="sysinfo-v1">—</span></div>
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 2</span><span class="sysinfo-vessel-val" id="sysinfo-v2">—</span></div>
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 3</span><span class="sysinfo-vessel-val" id="sysinfo-v3">—</span></div>
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 4</span><span class="sysinfo-vessel-val" id="sysinfo-v4">—</span></div>
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 5</span><span class="sysinfo-vessel-val" id="sysinfo-v5">—</span></div>
-                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 6</span><span class="sysinfo-vessel-val" id="sysinfo-v6">—</span></div>
-                                        </div>
+                                    <div class="sysinfo-temp-badge ext">
+                                        <span class="sysinfo-temp-label">External</span>
+                                        <span class="sysinfo-ext-value" id="sysinfo-ext">—</span>
                                     </div>
                                 </div>
                             </section>
 
-                            <div class="sysinfo-right-col">
-                                <section class="sysinfo-card sysinfo-state-card" aria-label="Machine state">
-                                    <div class="sysinfo-card-header">
-                                        <h3 class="sysinfo-card-title">Machine State</h3>
-                                    </div>
-                                    <div class="sysinfo-state-line" id="sysinfo-machine-state">—</div>
-                                </section>
+                            <section class="sysinfo-band sysinfo-band-vessels" aria-label="Vessel temperatures">
+                                <div class="sysinfo-band-title">Vessels</div>
+                                <div class="sysinfo-vessel-row">
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V1</span><span class="sysinfo-vessel-val" id="sysinfo-v1">—</span></div>
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V2</span><span class="sysinfo-vessel-val" id="sysinfo-v2">—</span></div>
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V3</span><span class="sysinfo-vessel-val" id="sysinfo-v3">—</span></div>
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V4</span><span class="sysinfo-vessel-val" id="sysinfo-v4">—</span></div>
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V5</span><span class="sysinfo-vessel-val" id="sysinfo-v5">—</span></div>
+                                    <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">V6</span><span class="sysinfo-vessel-val" id="sysinfo-v6">—</span></div>
+                                </div>
+                            </section>
 
-                                <section class="sysinfo-card sysinfo-subsystem-card" aria-label="Subsystem status">
-                                    <div class="sysinfo-card-header">
-                                        <h3 class="sysinfo-card-title">Subsystems</h3>
+                            <section class="sysinfo-band sysinfo-band-state" aria-label="Machine state">
+                                <div class="sysinfo-band-title">Machine State</div>
+                                <div class="sysinfo-state-line" id="sysinfo-machine-state">—</div>
+                            </section>
+
+                            <section class="sysinfo-band sysinfo-band-subs" aria-label="Subsystem status">
+                                <div class="sysinfo-band-title">Subsystems</div>
+                                <div class="sysinfo-subsystem-grid">
+                                    <div class="sysinfo-subsystem-item">
+                                        <span class="sysinfo-subsystem-key">Float Switch</span>
+                                        <span class="sysinfo-subsystem-val" id="sysinfo-float-switch">—</span>
                                     </div>
-                                    <div class="sysinfo-subsystem-grid">
-                                        <div class="sysinfo-subsystem-item">
-                                            <span class="sysinfo-subsystem-key">Float Switch</span>
-                                            <span class="sysinfo-subsystem-val" id="sysinfo-float-switch">—</span>
-                                        </div>
-                                        <div class="sysinfo-subsystem-item">
-                                            <span class="sysinfo-subsystem-key">Heater Sensor</span>
-                                            <span class="sysinfo-subsystem-val" id="sysinfo-heater-sensor">—</span>
-                                        </div>
-                                        <div class="sysinfo-subsystem-item">
-                                            <span class="sysinfo-subsystem-key">Pump</span>
-                                            <span class="sysinfo-subsystem-val" id="sysinfo-pump">—</span>
-                                        </div>
-                                        <div class="sysinfo-subsystem-item">
-                                            <span class="sysinfo-subsystem-key">Sample Collector</span>
-                                            <span class="sysinfo-subsystem-val" id="sysinfo-sample-collector">—</span>
-                                        </div>
+                                    <div class="sysinfo-subsystem-item">
+                                        <span class="sysinfo-subsystem-key">Heater Sensor</span>
+                                        <span class="sysinfo-subsystem-val" id="sysinfo-heater-sensor">—</span>
                                     </div>
-                                </section>
-                            </div>
+                                    <div class="sysinfo-subsystem-item">
+                                        <span class="sysinfo-subsystem-key">Pump</span>
+                                        <span class="sysinfo-subsystem-val" id="sysinfo-pump">—</span>
+                                    </div>
+                                    <div class="sysinfo-subsystem-item">
+                                        <span class="sysinfo-subsystem-key">Sample Collector</span>
+                                        <span class="sysinfo-subsystem-val" id="sysinfo-sample-collector">—</span>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </div>
                 </div>
@@ -2758,7 +2586,7 @@
     <script src="input-focus.js?v=1"></script>
     <script src="rbac.js?v=6"></script>
     <script src="disso_client.js?v=1"></script>
-    <script src="script.js?v=87"></script>
+    <script src="script.js?v=88"></script>
     <script src="validation_suite.js?v=1"></script>
 </body>
 

@@ -4631,6 +4631,10 @@ function runRpmValidation() {
         showAppModal('Please enter a valid target RPM.', 'RPM Validation');
         return;
     }
+    if (!isDissolutionRpmInRange(target)) {
+        showAppModal(dissolutionRpmRangeMessage('Target'), 'RPM Validation');
+        return;
+    }
     if (isNaN(tachometer) || tachometer <= 0) {
         showAppModal('Please enter the RPM measured with a certified tachometer.', 'RPM Validation');
         return;

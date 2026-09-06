@@ -578,13 +578,24 @@ def _approval_verifier_eligible_for_recipe(verifier: dict) -> bool:
     return rbac_service.member_has_internal(vm, "recipe-approve")
 
 
-def _approval_verifier_eligible_for_report(verifier: dict) -> bool:
-    """Test report approval: verifier must have test-report-approve permission (Factory bypass)."""
+def _report_approve_feature_for_type(report_type) -> str:
+    """Map report type to RBAC internal approve feature."""
+    rtype = str(report_type or "").strip().lower()
+    if rtype == "validation":
+        return "validation-report-approve"
+    if rtype == "calibration":
+        return "calibration-report-approve"
+    return "test-report-approve"
+
+
+def _approval_verifier_eligible_for_report(verifier: dict, report_type=None) -> bool:
+    """Report approval: verifier must have type-specific approve permission (Factory bypass)."""
     vm = _approval_verifier_member(verifier)
     role = str(vm.get("role") or "").strip().lower()
     if role == "factory":
         return True
-    return rbac_service.member_has_internal(vm, "test-report-approve")
+    feature = _report_approve_feature_for_type(report_type)
+    return rbac_service.member_has_internal(vm, feature)
 
 
 def _approval_verifier_eligible_for_user_admin(verifier: dict) -> bool:
@@ -655,7 +666,7 @@ def _stamp_report_operator(enriched):
 
 def _report_requires_approval(report):
     rtype = (report.get("type") or "").strip().lower()
-    return rtype in ("test", "validation")
+    return rtype in ("test", "validation", "calibration")
 
 
 def _check_report_approved_for_print_export(report=None, report_id=None, report_data=None):
@@ -1086,7 +1097,7 @@ def _cleanup_approval_verify_tokens():
         _approval_verify_tokens.pop(token, None)
 
 
-def _issue_approval_verify_token(verifier_user, purpose):
+def _issue_approval_verify_token(verifier_user, purpose, required_feature=None, report_type=None):
     _cleanup_approval_verify_tokens()
     now = int(time.time())
     token = secrets.token_urlsafe(24)
@@ -1098,11 +1109,15 @@ def _issue_approval_verify_token(verifier_user, purpose):
         "issuedAt": now,
         "expiresAt": now + APPROVAL_VERIFY_TTL_SECONDS,
     }
+    if required_feature:
+        payload["requiredFeature"] = str(required_feature).strip()
+    if report_type:
+        payload["reportType"] = str(report_type).strip().lower()
     _approval_verify_tokens[token] = payload
     return token, payload
 
 
-def _consume_approval_verify_token(expected_purpose):
+def _consume_approval_verify_token(expected_purpose, required_feature=None):
     _cleanup_approval_verify_tokens()
     token = (request.headers.get("X-Approval-Verify-Token") or "").strip()
     if not token:
@@ -1115,8 +1130,9 @@ def _consume_approval_verify_token(expected_purpose):
     if got != exp:
         return None, "Approval verification was issued for a different action."
     if exp == "report":
-        if not _verifier_payload_has_internal(payload, "test-report-approve"):
-            return None, "Verifier does not have test report approval permission."
+        feature = str(required_feature or payload.get("requiredFeature") or "test-report-approve").strip()
+        if not _verifier_payload_has_internal(payload, feature):
+            return None, "Verifier does not have permission to approve this report type."
     elif exp == "recipe":
         if not _verifier_payload_has_internal(payload, "recipe-approve"):
             return None, "Verifier does not have recipe approval permission."
@@ -1514,9 +1530,9 @@ def create_report():
             recipe=recipe,
             factory_settings=report_data.get("factorySettings"),
         )
-        if (enriched.get("type") or "").strip().lower() in ("test", "validation"):
+        if (enriched.get("type") or "").strip().lower() in ("test", "validation", "calibration"):
             enriched = _stamp_report_operator(enriched)
-            # Aborted test/validation reports also require approval.
+            # Aborted test/validation/calibration reports also require approval.
             enriched["reportApprovalStatus"] = "pending"
             for k in ("approvalPassFail", "approvalRemarks", "approvedBy", "approvedAt", "approvedByUsername"):
                 enriched.pop(k, None)
@@ -1545,10 +1561,14 @@ def create_report():
 @app.route("/api/data/reports/<int:report_id>/approve", methods=["POST"])
 def approve_report(report_id):
     try:
+        report = data_service.get_report(report_id)
+        if not report:
+            return jsonify({"ok": False, "error": "Report not found"}), 404
+        required_feature = _report_approve_feature_for_type(report.get("type"))
         token = (request.headers.get("X-Approval-Verify-Token") or "").strip()
         verified = None
         if token:
-            verified, verify_err = _consume_approval_verify_token("report")
+            verified, verify_err = _consume_approval_verify_token("report", required_feature=required_feature)
             if verify_err:
                 return jsonify({"ok": False, "error": verify_err}), 401
         else:
@@ -1577,9 +1597,6 @@ def approve_report(report_id):
         remarks = (body.get("remarks") or "").strip()
         approver_name = (body.get("approverName") or "").strip()
         role_header = (request.headers.get("X-User-Role") or "").strip()
-        report = data_service.get_report(report_id)
-        if not report:
-            return jsonify({"ok": False, "error": "Report not found"}), 404
         verified_username = _norm_username(verified.get("username"))
         st_raw = report.get("reportApprovalStatus")
         st = str(st_raw or "").strip().lower()
@@ -1595,6 +1612,10 @@ def approve_report(report_id):
         op_username = _report_operated_by_username(report)
         if op_username and verified_username == op_username and _effective_request_role() != "factory":
             return jsonify({"ok": False, "error": "Operator cannot approve their own report."}), 403
+        # Non-factory: re-check type-specific permission (token may be stale/wrong type).
+        if _effective_request_role() != "factory":
+            if not _approval_verifier_eligible_for_report(verified, report.get("type")):
+                return jsonify({"ok": False, "error": "Verifier does not have permission to approve this report type."}), 403
         verified_name = (verified.get("name") or verified.get("username") or approver_name or "—").strip()
         verified_role = (verified.get("role") or role_header or "").strip()
         by_line = verified_name
@@ -2858,8 +2879,24 @@ def approval_verify():
             return jsonify({"ok": False, "error": "Unsupported verification method"}), 400
 
         verifier_role = str(verifier.get("role") or "").strip().lower()
+        report_type = None
+        required_feature = None
         if purpose == "report":
-            eligible = _approval_verifier_eligible_for_report(verifier)
+            report_id = payload.get("reportId") or payload.get("report_id")
+            report_type = str(payload.get("reportType") or payload.get("report_type") or "").strip().lower()
+            if report_id is not None and str(report_id).strip() != "":
+                try:
+                    rid = int(report_id)
+                except (TypeError, ValueError):
+                    rid = None
+                if rid is not None:
+                    rp = data_service.get_report(rid)
+                    if rp:
+                        report_type = str(rp.get("type") or report_type or "test").strip().lower()
+            if not report_type:
+                report_type = "test"
+            required_feature = _report_approve_feature_for_type(report_type)
+            eligible = _approval_verifier_eligible_for_report(verifier, report_type)
         elif purpose == "recipe":
             eligible = _approval_verifier_eligible_for_recipe(verifier)
         else:
@@ -2872,7 +2909,8 @@ def approval_verify():
                 entity_name=purpose,
                 details="Verifier lacks required permission",
                 target_user=verifier.get("username") or username,
-                extra={"purpose": purpose, "verifierRole": verifier_role, "method": method},
+                extra={"purpose": purpose, "verifierRole": verifier_role, "method": method,
+                       "reportType": report_type, "requiredFeature": required_feature},
             )
             return jsonify({"ok": False, "error": "Verifier does not have permission for this approval"}), 403
 
@@ -2892,7 +2930,9 @@ def approval_verify():
                     )
                     return jsonify({"ok": False, "error": "Verifier account is not active"}), 403
 
-        token, token_payload = _issue_approval_verify_token(verifier, purpose)
+        token, token_payload = _issue_approval_verify_token(
+            verifier, purpose, required_feature=required_feature, report_type=report_type
+        )
         vname = verifier.get("username") or username
         _audit_event(
             action="Approval verification",

@@ -250,6 +250,7 @@ var recipeListMode = 'manage'; // 'manage' | 'load'
 var _suppressTestRunNavGuardOnce = false;
 var _suppressValidationRunNavGuardOnce = false;
 var _suppressValidationSuiteNavGuardOnce = false;
+var _suppressCalibrationNavGuardOnce = false;
 var _validationAbortInProgress = false;
 var testRunButtonState = 'start';
 var _reportApprovalPollTimerId = null;
@@ -579,13 +580,14 @@ function _dtConfirmAbortForNavigation() {
         'Stay'
     ).then(function (ok) {
         if (!ok) return false;
-        return Promise.resolve(_dtPerformAbort({ skipPreview: true })).then(function () {
+        // Save pending aborted report and open locked preview; do not navigate away.
+        return Promise.resolve(_dtPerformAbort({})).then(function () {
             if (typeof cleanupDissolutionTestOnLeave === 'function') cleanupDissolutionTestOnLeave();
             if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
-            return true;
+            return false;
         }).catch(function () {
             if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
-            return true;
+            return false;
         });
     });
 }
@@ -599,17 +601,22 @@ function _confirmAbortValidationSuiteForNavigation() {
         kindLabel = getValidationSuiteAbortLabel() || kindLabel;
     }
     return showConfirmModal(
-        'Do you want to abort ' + kindLabel + '? Progress will be lost and no report will be generated.',
+        'Do you want to abort ' + kindLabel + '? Progress will be saved as an aborted report and requires approval.',
         'Abort Validation',
         { okLabel: 'Abort' }
     ).then(function (ok) {
         if (!ok) return false;
-        if (typeof abortValidationSuite === 'function') {
-            abortValidationSuite({ reason: 'navigation leave', silent: true });
-        }
-        if (typeof stopRpmValidationMotor === 'function') stopRpmValidationMotor();
-        if (typeof applyValidationSuiteLockUi === 'function') applyValidationSuiteLockUi();
-        return true;
+        var abortFn = typeof abortValidationSuite === 'function' ? abortValidationSuite : null;
+        if (!abortFn) return true;
+        return Promise.resolve(abortFn({ reason: 'navigation leave' })).then(function () {
+            if (typeof stopRpmValidationMotor === 'function') stopRpmValidationMotor();
+            if (typeof applyValidationSuiteLockUi === 'function') applyValidationSuiteLockUi();
+            // Pending preview/lock opened by abort — stay on report screen.
+            return false;
+        }).catch(function () {
+            if (typeof applyValidationSuiteLockUi === 'function') applyValidationSuiteLockUi();
+            return false;
+        });
     });
 }
 
@@ -1408,7 +1415,9 @@ function isReportPreviewLockedForCurrentUser(preview) {
     if (typeof isFactorySessionUser === 'function' && isFactorySessionUser()) return false;
     var p = preview || window._lastReportPreview || {};
     var reportTypeNorm = String(p.type || 'test').trim().toLowerCase();
-    if (reportTypeNorm !== 'test' && reportTypeNorm !== 'validation') return false;
+    if (reportTypeNorm !== 'test' && reportTypeNorm !== 'validation' && reportTypeNorm !== 'calibration') {
+        return false;
+    }
     if (!isReportPendingApproval(p)) return false;
     return isCurrentUserReportOperator(p);
 }
@@ -1567,9 +1576,9 @@ function updateReportApprovePanelForPreview(preview) {
     var reportTypeNorm = String((preview || {}).type || 'test').trim().toLowerCase();
     var titleEl = document.getElementById('report-approve-panel-title') || apprPanel.querySelector('h3');
     if (titleEl) {
-        titleEl.textContent = reportTypeNorm === 'validation'
-            ? 'Validation report approval'
-            : 'Test report approval';
+        if (reportTypeNorm === 'validation') titleEl.textContent = 'Validation report approval';
+        else if (reportTypeNorm === 'calibration') titleEl.textContent = 'Calibration report approval';
+        else titleEl.textContent = 'Test report approval';
     }
     apprPanel.style.display = pending ? 'block' : 'none';
     if (!pending) clearReportApproveVerifyError();
@@ -1659,14 +1668,16 @@ function abortPendingReportOnLogout() {
     });
 }
 
+/** Always open preview and apply pending approval gate when applicable. */
+function openPendingReportPreview(reportId) {
+    if (reportId == null) return;
+    openReportPreview(reportId, { setGate: true });
+}
+
 function finishTestRunReportSaved(reportId) {
     if (typeof resetQuickTestFormAfterRunIfPending === 'function') resetQuickTestFormAfterRunIfPending();
     if (reportId) {
-        if (typeof openReportPreview === 'function') {
-            openReportPreview(reportId, { setGate: true });
-        } else {
-            goToPage('reports');
-        }
+        openPendingReportPreview(reportId);
     } else {
         goToPage('reports');
         if (typeof loadReports === 'function') loadReports();
@@ -2409,9 +2420,28 @@ function goToPage(pageName) {
         });
         return;
     }
+    if (!_suppressCalibrationNavGuardOnce && typeof isTemperatureCalibrationActive === 'function' &&
+        isTemperatureCalibrationActive() && pageName !== 'calibration' && pageName !== 'report-preview') {
+        showConfirmModal(
+            'Do you want to abort calibration? Progress will be saved as an aborted report and requires approval.',
+            'Abort Calibration',
+            { okLabel: 'Abort' }
+        ).then(function (ok) {
+            if (!ok) return;
+            Promise.resolve(
+                typeof abortTemperatureCalibrationHold === 'function'
+                    ? abortTemperatureCalibrationHold({ reason: 'navigation leave' })
+                    : null
+            ).then(function () {
+                // Locked preview opened by abort — do not continue to destination.
+            });
+        });
+        return;
+    }
     _suppressTestRunNavGuardOnce = false;
     _suppressValidationRunNavGuardOnce = false;
     _suppressValidationSuiteNavGuardOnce = false;
+    _suppressCalibrationNavGuardOnce = false;
     if (pageName !== 'report-preview' && typeof isReportPreviewLockedForCurrentUser === 'function' &&
         isReportPreviewLockedForCurrentUser(window._lastReportPreview)) {
         showAppModal('This report is awaiting approval. You must stay on the report screen until a reviewer approves it.', 'Report');
@@ -2846,6 +2876,7 @@ function logout() {
         (typeof isTestRunActive === 'function' && isTestRunActive()) ||
         (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) ||
         (typeof isValidationSuiteActive === 'function' && isValidationSuiteActive()) ||
+        (typeof isTemperatureCalibrationActive === 'function' && isTemperatureCalibrationActive()) ||
         (validationRunState === 'running') ||
         (validationRunBackendPending === true);
     var pendingGate = window._reportApprovalGate && window._reportApprovalGate.reportId != null &&
@@ -2855,17 +2886,7 @@ function logout() {
         abortPendingReportOnLogout().then(function () {
             return stopActiveRunForLogout();
         }).then(function () {
-            if (typeof isValidationSuiteActive === 'function' && isValidationSuiteActive() &&
-                typeof abortValidationSuite === 'function') {
-                abortValidationSuite({ reason: 'logout', silent: true });
-            }
             if (typeof stopRpmValidationMotor === 'function') stopRpmValidationMotor();
-            if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive() &&
-                typeof _dtPerformAbort === 'function') {
-                return _dtPerformAbort({ skipPreview: true });
-            }
-            return null;
-        }).then(function () {
             return auditExitActiveScreenBeforeSessionEnd();
         }).then(flushAuditEventQueue).then(function () {
             return apiRequest(API_BASE + '/api/data/auth/logout', { method: 'POST', body: { reason: 'user' } });
@@ -2881,10 +2902,45 @@ function logout() {
         });
     };
 
+    var abortActiveRunForPendingPreview = function () {
+        var chain = Promise.resolve(null);
+        if (typeof isValidationSuiteActive === 'function' && isValidationSuiteActive() &&
+            typeof abortValidationSuite === 'function') {
+            chain = chain.then(function () {
+                return abortValidationSuite({ reason: 'logout' });
+            });
+        }
+        if (typeof isTemperatureCalibrationActive === 'function' && isTemperatureCalibrationActive() &&
+            typeof abortTemperatureCalibrationHold === 'function') {
+            chain = chain.then(function () {
+                return abortTemperatureCalibrationHold({ reason: 'logout' });
+            });
+        }
+        if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive() &&
+            typeof _dtPerformAbort === 'function') {
+            chain = chain.then(function () {
+                return _dtPerformAbort({});
+            });
+        }
+        if (validationRunState === 'running' || validationRunBackendPending) {
+            chain = chain.then(function () {
+                return abortValidationRun({ openPreview: true });
+            });
+        }
+        return chain;
+    };
+
     if (runActive) {
-        showConfirmModal('Test is running. Do you want to abort and logout?', 'Operation in progress').then(function (ok) {
+        showConfirmModal(
+            'A run is in progress. Abort and open the pending report for approval? You cannot log out until it is approved.',
+            'Operation in progress'
+        ).then(function (ok) {
             if (!ok) return;
-            doLogout();
+            abortActiveRunForPendingPreview().then(function () {
+                showAppModal('You cannot log out until this report has been approved by a reviewer.', 'Report');
+            }).catch(function () {
+                showAppModal('You cannot log out until this report has been approved by a reviewer.', 'Report');
+            });
         });
         return;
     }
@@ -2892,7 +2948,8 @@ function logout() {
     if (pendingGate) {
         showAppModal('You cannot log out until this report has been approved by a reviewer.', 'Report');
         var rid = currentReportId || (window._reportApprovalGate && window._reportApprovalGate.reportId);
-        if (rid && typeof openReportPreview === 'function') openReportPreview(rid);
+        if (rid && typeof openPendingReportPreview === 'function') openPendingReportPreview(rid);
+        else if (rid && typeof openReportPreview === 'function') openReportPreview(rid);
         return;
     }
 
@@ -3116,9 +3173,12 @@ function runBiometricVerifyWithRetry(opts) {
                 opts.title || 'Verify Fingerprint',
                 opts.message || 'Place your finger on the scanner.'
             );
+            var verifyBody = { method: 'biometric', purpose: purpose };
+            if (opts.reportId != null) verifyBody.reportId = opts.reportId;
+            if (opts.reportType) verifyBody.reportType = opts.reportType;
             apiRequest(API_BASE + '/api/data/auth/approval-verify', {
                 method: 'POST',
-                body: { method: 'biometric', purpose: purpose }
+                body: verifyBody
             }).then(function (data) {
                 if (cancelled) return;
                 if (data && data.ok && data.token) {
@@ -4388,7 +4448,7 @@ function _rpmValPromptMeasured() {
 function onRpmValidationPrimary() {
     if (_rpmValRunActive) {
         showConfirmModal(
-            'Do you want to abort RPM validation? Progress will be lost.',
+            'Do you want to abort RPM validation? Progress will be saved as an aborted report and requires approval.',
             'Abort RPM Validation',
             { okLabel: 'Abort' }
         ).then(function (ok) {
@@ -6743,7 +6803,8 @@ function reportActionsBlockedForPreview(preview) {
     var p = preview || window._lastReportPreview || {};
     var reportTypeNorm = String(p.type || 'test').trim().toLowerCase();
     var approvalSt = String(p.reportApprovalStatus || '').trim().toLowerCase();
-    return approvalSt === 'pending' && (reportTypeNorm === 'test' || reportTypeNorm === 'validation');
+    return approvalSt === 'pending' &&
+        (reportTypeNorm === 'test' || reportTypeNorm === 'validation' || reportTypeNorm === 'calibration');
 }
 
 function buildReportPrintPayload(preview, reportId) {
@@ -7381,7 +7442,7 @@ function updateReportPreviewPrintExportButtons(preview) {
     var reportTypeNorm = String(p.type || 'test').trim().toLowerCase();
     var approvalSt = String(p.reportApprovalStatus || '').trim().toLowerCase();
     var blockActions = approvalSt === 'pending' &&
-        (reportTypeNorm === 'test' || reportTypeNorm === 'validation');
+        (reportTypeNorm === 'test' || reportTypeNorm === 'validation' || reportTypeNorm === 'calibration');
     var canPrint = typeof userCanPrintReports === 'function' && userCanPrintReports() && !blockActions;
     var canExport = typeof userCanExportToUsb === 'function' && userCanExportToUsb() && !blockActions;
     peGroup.style.display = (canPrint || canExport) ? 'flex' : 'none';
@@ -7395,9 +7456,15 @@ function updateReportPreviewPrintExportButtons(preview) {
 function verifyReportApproverInline(method) {
     method = method === 'biometric' ? 'biometric' : 'credentials';
     clearReportApproveVerifyError();
+    var preview = window._lastReportPreview || {};
+    var reportType = String(preview.type || 'test').trim().toLowerCase() || 'test';
+    var reportId = currentReportId != null ? currentReportId
+        : (window._reportApprovalGate && window._reportApprovalGate.reportId);
     if (method === 'biometric') {
         return runBiometricVerifyWithRetry({
             purpose: 'report',
+            reportId: reportId,
+            reportType: reportType,
             title: 'Verify Fingerprint',
             message: 'Place a Reviewer or Admin fingerprint on the scanner to approve this report.',
             failureHint: 'Place your finger on the scanner and tap Try again.'
@@ -7435,9 +7502,17 @@ function verifyReportApproverInline(method) {
             return Promise.resolve(null);
         }
     }
+    var verifyBody = {
+        method: 'credentials',
+        username: username,
+        password: password,
+        purpose: 'report',
+        reportType: reportType
+    };
+    if (reportId != null) verifyBody.reportId = reportId;
     return apiRequest(API_BASE + '/api/data/auth/approval-verify', {
         method: 'POST',
-        body: { method: 'credentials', username: username, password: password, purpose: 'report' }
+        body: verifyBody
     }).then(function (data) {
         if (!data || !data.ok || !data.token) {
             setReportApproveVerifyError((data && data.error) ? String(data.error) : 'Verification failed.');
@@ -11800,11 +11875,13 @@ function buildTemperatureCalibrationReportPayload(opts) {
         : new Date().toISOString();
     var startIso = opts.startedAt || nowIso;
     var channels = opts.channels || [];
+    var aborted = !!opts.aborted;
+    var statusLabel = aborted ? 'Aborted' : 'Completed';
     var reportPayload = {
-        name: 'Temperature Calibration - Completed',
+        name: 'Temperature Calibration - ' + statusLabel,
         type: 'calibration',
         calibrationSubtype: 'temperature',
-        status: 'Completed',
+        status: statusLabel,
         calibrationStartTime: startIso,
         calibrationEndTime: nowIso,
         createdAt: nowIso,
@@ -11812,7 +11889,8 @@ function buildTemperatureCalibrationReportPayload(opts) {
         temperatureChannels: channels,
         testData: {
             calibrationSubtype: 'temperature',
-            status: 'Completed',
+            status: statusLabel,
+            aborted: aborted,
             calibrationStartTime: startIso,
             calibrationEndTime: nowIso,
             testStartTime: startIso,
@@ -11843,13 +11921,18 @@ function saveTemperatureCalibrationReportAndOpenPreview(opts) {
                 return null;
             }
             if (typeof logTestReportSavedAudit === 'function') logTestReportSavedAudit(reportId, payload);
-            if (typeof openReportPreview === 'function') openReportPreview(reportId, { setGate: true });
+            if (typeof openPendingReportPreview === 'function') openPendingReportPreview(reportId);
+            else if (typeof openReportPreview === 'function') openReportPreview(reportId, { setGate: true });
             else goToPage('reports');
             return reportId;
         })
         .catch(function (err) {
             console.error('Failed to save temperature calibration report', err);
-            showAppModal('Calibration completed but saving the report failed.', 'Calibration');
+            showAppModal(
+                (opts && opts.aborted ? 'Calibration aborted' : 'Calibration completed') +
+                ' but saving the report failed.',
+                'Calibration'
+            );
             return null;
         });
 }

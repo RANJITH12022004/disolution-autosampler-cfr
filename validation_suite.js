@@ -112,6 +112,103 @@
         openKindScreen(kind);
     }
 
+    function buildAbortedSuiteValidationPayload(suite) {
+        var s = suite || {};
+        var r = s.results || {};
+        var rpm = r.rpm || {};
+        var phys = r.physical || {};
+        var sv = r.sampleVolume || r['sample-volume'] || {};
+        var temp = r.temperature || {};
+        var completedAt = nowIso();
+        var completedKinds = Object.keys(r);
+        var validationRuns = [];
+        if (rpm && (rpm.target != null || rpm.tachometer != null || rpm.pass != null)) {
+            validationRuns.push({
+                validationSubtype: 'rpm',
+                status: rpm.pass === false ? 'Fail' : (rpm.target != null ? 'Pass' : 'Incomplete'),
+                rpm: rpm.target,
+                currentRpm: rpm.tachometer,
+                tachometerRpm: rpm.tachometer,
+                delta: rpm.delta,
+                validationStartTime: rpm.startedAt || s.startedAt,
+                validationEndTime: rpm.completedAt || completedAt
+            });
+        }
+        if (phys && phys.acknowledged) {
+            validationRuns.push({
+                validationSubtype: 'physical',
+                status: 'Pass',
+                acknowledged: true,
+                validationStartTime: phys.completedAt || s.startedAt,
+                validationEndTime: phys.completedAt || completedAt
+            });
+        }
+        if (sv && (sv.measured != null || sv.pass != null)) {
+            validationRuns.push({
+                validationSubtype: 'sample_volume',
+                status: sv.pass ? 'Pass' : 'Fail',
+                sampleVolumeTarget: sv.target,
+                sampleVolumeTolerance: sv.tolerance,
+                sampleVolumeMeasured: sv.measured,
+                delta: sv.delta,
+                sampleVolumePass: !!sv.pass,
+                validationStartTime: sv.startedAt || s.startedAt,
+                validationEndTime: sv.completedAt || completedAt
+            });
+        }
+        if (temp && (temp.channels || temp.allPass != null || temp.bath != null)) {
+            validationRuns.push({
+                validationSubtype: 'temperature',
+                status: temp.allPass ? 'Pass' : 'Fail',
+                tolerance: getTempTol(),
+                allPass: !!temp.allPass,
+                temperatureChannels: temp.channels || [],
+                bath: temp.bath,
+                external: temp.external,
+                measured: temp.measured,
+                validationStartTime: temp.startedAt || s.startedAt,
+                validationEndTime: temp.completedAt || completedAt
+            });
+        }
+        var user = global.currentUser || {};
+        var payload = {
+            name: 'Dissolution Validation - Aborted',
+            type: 'validation',
+            validationSubtype: 'combined',
+            status: 'Aborted',
+            allPass: false,
+            createdAt: completedAt,
+            completedAt: completedAt,
+            validationStartTime: s.startedAt,
+            validationEndTime: completedAt,
+            testData: {
+                validationSubtype: 'combined',
+                status: 'Aborted',
+                aborted: true,
+                allPass: false,
+                completedSteps: completedKinds,
+                rpm: rpm,
+                physical: phys,
+                sampleVolume: sv,
+                temperature: temp,
+                validationRuns: validationRuns,
+                validationStartTime: s.startedAt,
+                validationEndTime: completedAt,
+                testStartTime: s.startedAt,
+                testEndTime: completedAt,
+                operatorName: user.name || user.username || '--',
+                employeeId: user.username || '--',
+                operatorUsername: user.username || '--',
+                createdAt: completedAt,
+                completedAt: completedAt
+            }
+        };
+        if (typeof stampOperatorOnTestReportPayload === 'function') {
+            payload = stampOperatorOnTestReportPayload(payload);
+        }
+        return payload;
+    }
+
     function abortValidationSuite(opts) {
         opts = opts || {};
         stopTempValHold();
@@ -126,6 +223,7 @@
             try { _rpmValAbortLocal(); } catch (e3) { /* ignore */ }
         }
         var s = global._validationSuite;
+        var wasActive = !!(s && s.active && !s.aborted);
         if (s) {
             s.active = false;
             s.aborted = true;
@@ -135,8 +233,37 @@
         }
         global._validationSuite = null;
         if (typeof applyValidationSuiteLockUi === 'function') applyValidationSuiteLockUi();
-        if (opts.silent) return;
-        goToPage('validate-type-select');
+
+        if (!wasActive) {
+            if (!opts.silent) goToPage('validate-type-select');
+            return Promise.resolve(null);
+        }
+
+        var payload = buildAbortedSuiteValidationPayload(s);
+        currentReportFilter = 'validation';
+        return apiRequest(API_BASE + '/api/data/reports', { method: 'POST', body: payload })
+            .then(function (result) {
+                var reportId = result && result.id;
+                if (reportId != null && typeof logTestReportSavedAudit === 'function') {
+                    logTestReportSavedAudit(reportId, payload);
+                }
+                if (reportId != null) {
+                    if (typeof openPendingReportPreview === 'function') openPendingReportPreview(reportId);
+                    else if (typeof openReportPreview === 'function') openReportPreview(reportId, { setGate: true });
+                    else if (!opts.silent) goToPage('reports');
+                    return reportId;
+                }
+                if (!opts.silent) goToPage('validate-type-select');
+                return null;
+            })
+            .catch(function (err) {
+                console.error('Aborted validation report failed', err);
+                if (!opts.silent) {
+                    showAppModal('Validation aborted but saving the report failed.', 'Validation');
+                    goToPage('validate-type-select');
+                }
+                return null;
+            });
     }
 
     function currentSuiteKind() {
@@ -164,7 +291,7 @@
         }
         var label = getValidationSuiteAbortLabel();
         showConfirmModal(
-            'Do you want to abort ' + label + '? Progress will be lost and no report will be generated.',
+            'Do you want to abort ' + label + '? Progress will be saved as an aborted report and requires approval.',
             'Abort Validation',
             { okLabel: 'Abort' }
         ).then(function (ok) {
@@ -343,7 +470,8 @@
                     return;
                 }
                 if (typeof logTestReportSavedAudit === 'function') logTestReportSavedAudit(reportId, payload);
-                if (typeof openReportPreview === 'function') openReportPreview(reportId, { setGate: true });
+                if (typeof openPendingReportPreview === 'function') openPendingReportPreview(reportId);
+                else if (typeof openReportPreview === 'function') openReportPreview(reportId, { setGate: true });
                 else goToPage('reports');
             })
             .catch(function (err) {
@@ -434,7 +562,7 @@
         }
         if (_tempValPhase === 'holding' || _tempValPhase === 'measure') {
             showConfirmModal(
-                'Do you want to abort temperature validation? Progress will be lost.',
+                'Do you want to abort temperature validation? Progress will be saved as an aborted report and requires approval.',
                 'Abort Temperature Validation',
                 { okLabel: 'Abort' }
             ).then(function (ok) {
@@ -670,7 +798,14 @@
         setTempCalStatus('Enter measured temperature, then press Calibrate.', null);
     }
 
-    function abortTemperatureCalibrationHold() {
+    function isTemperatureCalibrationActive() {
+        return _tempCalPhase === 'holding' || _tempCalPhase === 'ready' || _tempCalPhase === 'calibrating';
+    }
+
+    function abortTemperatureCalibrationHold(opts) {
+        opts = opts || {};
+        var wasActive = isTemperatureCalibrationActive();
+        var startedAt = opts.startedAt || nowIso();
         stopTempCalHold();
         _tempCalPhase = 'idle';
         var hold = document.getElementById('temp-cal-hold-stage');
@@ -684,7 +819,26 @@
             btn.textContent = 'Start';
             btn.disabled = false;
         }
-        setTempCalStatus('Aborted. Press Start to begin again.', null);
+        setTempCalStatus('Aborted.', null);
+        if (typeof logAuditEvent === 'function') {
+            logAuditEvent('Temperature calibration aborted', opts.reason || '', {
+                eventType: 'lifecycle',
+                entityType: 'calibration'
+            });
+        }
+        if (!wasActive) return Promise.resolve(null);
+        var channels = [
+            { label: 'Bath', live: _tempCalLive.bath, actual: null, reference: null },
+            { label: 'External', live: _tempCalLive.external, actual: null, reference: null }
+        ];
+        if (typeof saveTemperatureCalibrationReportAndOpenPreview === 'function') {
+            return saveTemperatureCalibrationReportAndOpenPreview({
+                aborted: true,
+                startedAt: startedAt,
+                channels: channels
+            });
+        }
+        return Promise.resolve(null);
     }
 
     function runDissoTemperatureCalibration() {
@@ -696,6 +850,7 @@
         }
         var btn = document.getElementById('temp-cal-btn');
         if (btn) btn.disabled = true;
+        _tempCalPhase = 'calibrating';
         setTempCalStatus('Calibrating…', 'is-running');
         var startedAt = nowIso();
         if (typeof logAuditEvent === 'function') {
@@ -718,6 +873,7 @@
         send('BT', measured).then(function () {
             return send('EXT', measured);
         }).then(function () {
+            _tempCalPhase = 'idle';
             setTempCalStatus('Calibration completed successfully.', 'is-success');
             if (typeof logAuditEvent === 'function') {
                 logAuditEvent('Temperature calibration completed', measured.toFixed(1) + ' °C', {
@@ -762,12 +918,17 @@
                     createdAt: completedAt
                 }
             };
+            if (typeof stampOperatorOnTestReportPayload === 'function') {
+                payload = stampOperatorOnTestReportPayload(payload);
+            }
             return apiRequest(API_BASE + '/api/data/reports', { method: 'POST', body: payload })
                 .then(function (result) {
                     var id = result && result.id;
-                    if (id && typeof openReportPreview === 'function') openReportPreview(id, { setGate: true });
+                    if (id && typeof openPendingReportPreview === 'function') openPendingReportPreview(id);
+                    else if (id && typeof openReportPreview === 'function') openReportPreview(id, { setGate: true });
                 });
         }).catch(function (err) {
+            _tempCalPhase = 'ready';
             setTempCalStatus((err && err.message) || 'Calibration failed.', 'is-error');
             if (btn) {
                 btn.disabled = false;
@@ -819,7 +980,7 @@
         }
         if (_svPhase === 'waiting-ent' || _svPhase === 'ready-next' || _svPhase === 'modal') {
             showConfirmModal(
-                'Do you want to abort sample volume validation? Progress will be lost.',
+                'Do you want to abort sample volume validation? Progress will be saved as an aborted report and requires approval.',
                 'Abort Sample Volume Validation',
                 { okLabel: 'Abort' }
             ).then(function (ok) {
@@ -1135,6 +1296,7 @@
     global.initTemperatureCalibrationPage = initTemperatureCalibrationPage;
     global.onTemperatureCalibrationPrimary = onTemperatureCalibrationPrimary;
     global.abortTemperatureCalibrationHold = abortTemperatureCalibrationHold;
+    global.isTemperatureCalibrationActive = isTemperatureCalibrationActive;
     global.initSampleVolumeValidationPage = initSampleVolumeValidationPage;
     global.onSampleVolumeValidationPrimary = onSampleVolumeValidationPrimary;
     global.continueAfterSampleVolumeResult = continueAfterSampleVolumeResult;

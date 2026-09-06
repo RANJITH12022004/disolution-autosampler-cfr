@@ -1,0 +1,45 @@
+[Unit]
+Description=Dissolution Tester CFR kiosk API (Flask)
+After=local-fs.target media-usb_internal.mount
+Wants=media-usb_internal.mount
+
+[Service]
+Type=simple
+User=rle
+Group=rle
+Environment=PYTHONUNBUFFERED=1
+Environment=APP_ROOT=/opt/kiosk
+Environment=INTERNAL_USB_PATH=/media/usb_internal
+Environment=STORAGE_DIR=/media/usb_internal/storage
+Environment=REPORTS_DIR=/media/usb_internal/reports
+Environment=AUDIT_DB_DIR=/media/usb_internal/db
+Environment=ESP_CMD_PORT=/dev/serial0
+Environment=ESP_CMD_BAUD=9600
+Environment=ESP_PORT=/dev/serial0
+Environment=ESP_BAUD=9600
+Environment=ESP_TEMP_PORT=/dev/ttyAMA3
+Environment=ESP_TEMP_BAUD=9600
+Environment=A4_PORT=/dev/ttyAMA4
+Environment=A4_BAUD=9600
+Environment=BIOMETRIC_PORT=/dev/ttyAMA5
+Environment=BIOMETRIC_BAUD=57600
+Environment=SIMULATE_HARDWARE=0
+Environment=KIOSK_USB_WAIT_SEC=60
+WorkingDirectory=/opt/kiosk
+
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+ExecStartPre=/usr/bin/env bash /opt/kiosk/scripts/kiosk_pre_start_port.sh
+ExecStartPre=-/usr/bin/env bash /opt/kiosk/scripts/kiosk_wait_internal_usb.sh
+ExecStartPre=-/usr/bin/env bash /opt/kiosk/scripts/kiosk_rtc_boot.sh
+
+ExecStart=/usr/bin/env bash /opt/kiosk/run_hardness_bridge.sh
+Restart=always
+RestartSec=3
+
+StandardOutput=append:/home/rle/kiosk_bridge.log
+StandardError=append:/home/rle/kiosk_bridge.log
+
+[Install]
+WantedBy=multi-user.target

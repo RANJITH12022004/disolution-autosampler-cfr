@@ -1,0 +1,2765 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <!-- Fixed for 1024x600 7-inch display -->
+    <meta name="viewport"
+        content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dissolution Tester</title>
+    <link rel="stylesheet" href="styles.css?v=81">
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div class="screen active" id="page-login">
+        <div class="centered-content">
+            <img alt="RAISE Logo" class="login-logo" src="./assets/rle_logo.png" />
+            <h2 class="welcome-text">Dissolution Tester</h2>
+            <div class="login-form-box">
+                <input class="login-input" placeholder="User/Employee ID:" type="text" id="login-uid"
+                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)" />
+                <input class="login-input" placeholder="Password:" type="password" id="login-pwd"
+                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)" />
+                <button type="button" class="login-btn" id="login-btn" onclick="login()">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <polyline points="12 5 19 12 12 19"></polyline>
+                    </svg>
+                    <span>Login</span>
+                </button>
+
+                <!-- Or divider -->
+                <div class="login-divider" id="login-divider">
+                    <span class="login-divider-line"></span>
+                    <span class="login-divider-text">or</span>
+                    <span class="login-divider-line"></span>
+                </div>
+
+                <!-- Fingerprint biometrics -->
+                <button type="button" id="login-biometric-btn" class="login-biometric-btn" onclick="loginBiometric()">
+                    <div class="biometric-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18.9 7a8 8 0 0 0-5.3-3.8A8 8 0 0 0 4 12"></path>
+                            <path d="M12 20a8 8 0 0 0 8-8 4.5 4.5 0 0 0-1-2.8"></path>
+                            <path d="M9.1 4.6A8 8 0 0 0 4.5 9.4"></path>
+                            <path d="M12 12a4 4 0 0 0-4 4"></path>
+                            <path d="M16 12a4 4 0 0 1-4 4"></path>
+                            <path d="M12 16v4"></path>
+                            <path d="M12 8a4 4 0 0 1 4 4"></path>
+                            <path d="M8 12a4 4 0 0 1 4-4"></path>
+                        </svg>
+                    </div>
+                    <span>Use Biometrics</span>
+                </button>
+
+                <div class="login-footer-info" id="login-footer-info">
+                    Model: <span id="login-footer-model-no"></span> | Serial: <span id="login-footer-serial-no"></span>
+                </div>
+                <span class="login-footer-link" style="cursor: default;">https://www.raiselabequip.com</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic App Message Modal (global, works on login + app) -->
+    <div id="app-modal-overlay" class="modal-overlay" style="display: none;">
+        <div class="role-modal">
+            <h3 id="app-modal-title">Message</h3>
+            <p id="app-modal-message"></p>
+            <div class="role-modal-buttons" id="app-modal-buttons">
+                <button type="button" class="btn-role-select btn-role-user" onclick="closeAppModal()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Procedure Modal (Validation instructions) -->
+    <div id="procedure-modal" class="validation-modal-overlay" style="display: none;">
+        <div class="validation-modal-content">
+            <h2 id="procedure-modal-title" class="calibration-modal-title">Procedure</h2>
+            <div id="procedure-modal-steps" class="calibration-steps-box"></div>
+            <div class="validation-question-container">
+                <p class="validation-question-text">Do you want to proceed?</p>
+                <div class="validation-buttons">
+                    <button class="btn-validation-no" onclick="closeProcedureModal()">NO</button>
+                    <button class="btn-validation-yes" onclick="confirmProcedureModal()">YES</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="biometric-progress-overlay" class="modal-overlay" style="display: none;">
+        <div class="role-modal biometric-progress-modal">
+            <div class="bio-enroll-steps" id="bio-enroll-steps" style="display: none;">
+                <div class="bio-enroll-step" data-step="1"><span class="bio-step-num">1</span><span class="bio-step-label">First scan</span></div>
+                <div class="bio-enroll-step-line" aria-hidden="true"></div>
+                <div class="bio-enroll-step" data-step="2"><span class="bio-step-num">2</span><span class="bio-step-label">Second scan</span></div>
+            </div>
+            <div class="bio-finger-stage" id="bio-finger-stage" style="display: none;">
+                <div class="bio-finger-scanner" aria-hidden="true"></div>
+                <div class="bio-finger-icon" id="bio-finger-icon" aria-hidden="true">
+                    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18.9 7a8 8 0 0 0-5.3-3.8A8 8 0 0 0 4 12"></path>
+                        <path d="M12 20a8 8 0 0 0 8-8 4.5 4.5 0 0 0-1-2.8"></path>
+                        <path d="M9.1 4.6A8 8 0 0 0 4.5 9.4"></path>
+                        <path d="M12 12a4 4 0 0 0-4 4"></path>
+                    </svg>
+                </div>
+            </div>
+            <h3 id="biometric-progress-title">Register Fingerprint</h3>
+            <p id="biometric-progress-message" class="section-subtitle">Place finger now.</p>
+            <p id="biometric-progress-hint" class="bio-enroll-hint"></p>
+            <div id="biometric-progress-spinner" class="biometric-progress-spinner" aria-hidden="true" style="display: none;"></div>
+            <div class="role-modal-buttons">
+                <button type="button" id="biometric-progress-retry-btn" class="btn-role-select btn-role-user" style="display: none;" onclick="retryBiometricProgress()">Try again</button>
+                <button type="button" class="btn-role-select btn-role-cancel" onclick="cancelBiometricProgress()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic loading overlay (export progress, long-running ops) -->
+    <div id="app-loading-overlay" class="modal-overlay" style="display: none;">
+        <div class="role-modal app-loading-modal">
+            <h3 id="app-loading-title">Working...</h3>
+            <p id="app-loading-message" class="section-subtitle">Please wait.</p>
+            <div id="app-loading-spinner" class="biometric-progress-spinner" aria-hidden="true"></div>
+            <div id="app-loading-progress-wrap" class="app-loading-progress-wrap" style="display:none;">
+                <div class="app-loading-progress-track">
+                    <div id="app-loading-progress-bar" class="app-loading-progress-bar" style="width:0%;"></div>
+                </div>
+                <div class="app-loading-progress-pct" id="app-loading-progress-pct">0%</div>
+            </div>
+            <p id="app-loading-detail" class="app-loading-detail" style="opacity:0.85; font-size:0.85rem; margin-top:6px;"></p>
+            <div class="role-modal-buttons" id="app-loading-buttons">
+                <button type="button" id="app-loading-cancel-btn" class="btn-role-select btn-role-cancel" onclick="cancelLoadingOverlay()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- USB pendrive picker (shown when multiple external pendrives are detected) -->
+    <div id="usb-picker-overlay" class="modal-overlay" style="display: none;">
+        <div class="role-modal usb-picker-modal">
+            <h3>Choose Pendrive</h3>
+            <p class="section-subtitle">Multiple external pendrives are connected. Pick one to export to.</p>
+            <div id="usb-picker-list" class="usb-picker-list"></div>
+            <div class="role-modal-buttons">
+                <button type="button" class="btn-role-select btn-role-cancel" onclick="cancelUsbPicker()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container" style="display: none;">
+        <aside class="sidebar">
+            <div class="user-profile" onclick="goToPage('user-profile')" style="cursor: pointer;">
+                <div class="user-avatar">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" style="color: var(--icon-profile, #60a5fa);">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span>Profiles</span>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <button class="nav-item active" data-page="home" data-rbac-nav="dashboard">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
+                    <span>Home</span>
+                </button>
+                <button class="nav-item" data-page="validate" data-rbac-nav="validate-menu">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    <span>Validation</span>
+                </button>
+                <button class="nav-item" data-page="reports" data-rbac-nav="reports-view">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <span>Reports</span>
+                </button>
+                <button class="nav-item" data-page="settings" data-rbac-nav="settings">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                    <span>Settings</span>
+                </button>
+                <button type="button" class="nav-item logout-btn" onclick="logout()" title="Logout">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    <span>Logout</span>
+                </button>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="app-header">
+                <div class="header-left">
+                    <img id="header-logo" src="./assets/rle_logo.png" alt="Raise Lab Equipment" class="company-logo"
+                        onclick="goToPage('home')" style="cursor: pointer;">
+                    <div id="header-back-btn" class="header-back-btn" onclick="goBack()"
+                        style="display: none; cursor: pointer;" title="Back">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                    </div>
+                </div>
+                <h1 class="page-title" id="header-title">Dissolution Tester</h1>
+                <div class="header-right">
+                    <div class="datetime">
+                        <span id="current-time">--:--:--</span>
+                        <span id="current-date">--/--/----</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="page-content">
+                <!-- Home Page -->
+                <div class="page active" id="page-home">
+                    <div class="test-options">
+                        <div class="test-card" onclick="startQuickTest()" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                                </svg>
+                            </div>
+                            <h2>Quick Test</h2>
+                            <p>Run a dissolution test without saving a recipe</p>
+                        </div>
+
+                        <div class="test-card" onclick="startRecipeCreation()" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="8" x2="12" y2="16"></line>
+                                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                                </svg>
+                            </div>
+                            <h2>Create New Recipe</h2>
+                            <p>Create a new dissolution test recipe</p>
+                        </div>
+
+                        <div class="test-card" onclick="startRecipeTest()" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                            </div>
+                            <h2>Load Recipe</h2>
+                            <p>Test with saved recipe and tolerance checks</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-approval-verify">
+                    <div class="add-member-container approval-verify-page">
+                        <h2 id="approval-verify-title" class="section-title">Admin verification required</h2>
+                        <p id="approval-verify-subtitle" class="section-subtitle">Enter Admin credentials to continue.</p>
+                        <div class="add-member-form form-grid">
+                            <div class="form-group full-width">
+                                <label for="approval-verify-username">Admin username</label>
+                                <input type="text" id="approval-verify-username" class="input-field" placeholder="Enter Admin username"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="approval-verify-password">Password</label>
+                                <input type="password" id="approval-verify-password" class="input-field" placeholder="Enter password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <p id="approval-verify-error" class="approval-verify-error" style="display: none;"></p>
+                        </div>
+                        <div class="add-member-actions members-actions-row">
+                            <button type="button" class="btn btn-primary" onclick="submitApprovalVerifyModal()">Verify & Continue</button>
+                            <button type="button" class="btn btn-secondary" onclick="submitApprovalVerifyBiometricModal()">Use Fingerprint</button>
+                            <button type="button" class="btn btn-secondary" onclick="cancelApprovalVerifyModal()">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Test — dissolution one-shot (not saved as recipe) -->
+                <div class="page" id="page-quick-test">
+                    <div class="add-member-container dissolution-create-recipe" style="max-width: 900px; margin: 0 auto;">
+                        <div class="add-member-form form-grid">
+                            <div class="form-group">
+                                <label for="quick-product-name">Recipe Name</label>
+                                <input type="text" id="quick-product-name" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-temperature">Temperature (°C)</label>
+                                <input type="number" id="quick-temperature" class="input-field" min="20" max="50" step="0.1"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-step-count">Number of Steps</label>
+                                <input type="number" id="quick-step-count" class="input-field" min="1" max="12" step="1"
+                                    onchange="onQuickDissolutionStepCountChange()"
+                                    oninput="onQuickDissolutionStepCountChange()"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-mode">Sample Drop</label>
+                                <select id="quick-mode" class="input-field">
+                                    <option value="Auto">Auto</option>
+                                    <option value="Manual">Manual</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-usp">USP</label>
+                                <select id="quick-usp" class="input-field">
+                                    <option value="USP 1">USP 1</option>
+                                    <option value="USP 2">USP 2</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-media">Media</label>
+                                <input type="text" id="quick-media" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-media-volume">Media Volume</label>
+                                <input type="text" id="quick-media-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-media-ph">Media pH</label>
+                                <input type="number" id="quick-media-ph" class="input-field" min="0" max="14" step="0.01"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-sample-volume">Sample Volume</label>
+                                <input type="text" id="quick-sample-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-rinse-volume">Flush Volume</label>
+                                <input type="text" id="quick-rinse-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-replenishment">Replenishment</label>
+                                <select id="quick-replenishment" class="input-field">
+                                    <option value="Yes">Yes</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="quick-power-failure">Power Failure (min)</label>
+                                <input type="number" id="quick-power-failure" class="input-field" min="1" max="60" step="1"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <p class="section-subtitle" style="margin-top: 16px;">
+                            Temperature is the same for every step. Enter RPM and duration (HH:MM:SS) for each step.
+                        </p>
+                        <div class="dissolution-steps-header">
+                            <span>Step</span>
+                            <span>RPM</span>
+                            <span>Duration (HH:MM:SS)</span>
+                        </div>
+                        <div id="quick-create-recipe-steps-list" class="dissolution-steps-list"></div>
+
+                        <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
+                            <button type="button" class="btn btn-primary" onclick="startQuickTestRunFromParams()">Start Test</button>
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back to Home</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-test-run">
+                    <div class="dt-live">
+                        <div class="dt-status-banner is-ready" id="dt-status-banner" hidden aria-hidden="true"></div>
+
+                        <header class="dt-header">
+                            <div class="dt-header-row">
+                                <div class="dt-title-block">
+                                    <div class="dt-recipe-title" id="dt-recipe-name">--</div>
+                                </div>
+                                <div class="dt-header-side">
+                                    <button type="button" class="dt-vessel-info-btn" id="dt-vessel-info-btn" onclick="openVesselTemperaturePage()" title="Vessel temperatures" aria-label="Vessel temperature info">
+                                        <span class="dt-vessel-info-icon" aria-hidden="true">i</span>
+                                        <span class="dt-vessel-info-text">Vessels</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="dt-spec-strip" aria-label="Recipe details">
+                                <div class="dt-spec"><span class="dt-spec-key">AR No</span><strong class="dt-spec-val" id="dt-ar-number">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">Batch No</span><strong class="dt-spec-val" id="dt-batch-number">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">Batch Size</span><strong class="dt-spec-val" id="dt-batch-size">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">Media</span><strong class="dt-spec-val" id="dt-media">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">Media pH</span><strong class="dt-spec-val" id="dt-media-ph">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">Sample Drop</span><strong class="dt-spec-val" id="dt-mode">--</strong></div>
+                                <div class="dt-spec"><span class="dt-spec-key">USP</span><strong class="dt-spec-val" id="dt-usp">--</strong></div>
+                            </div>
+                            <div class="dt-progress-wrap">
+                                <span class="dt-progress-caption">Progress</span>
+                                <div class="dt-progress-track" aria-hidden="true">
+                                    <div class="dt-progress-fill" id="dt-progress-fill" style="width: 0%"></div>
+                                </div>
+                                <span class="dt-progress-pct" id="dt-progress-pct">0%</span>
+                            </div>
+                        </header>
+
+                        <div class="dt-body">
+                            <div class="dt-console">
+                                <aside class="dt-panel dt-panel-metrics" aria-label="Run parameters">
+                                    <div class="dt-panel-title">Run Parameters</div>
+                                    <div class="dt-metrics-grid">
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">Step</span>
+                                            <strong class="dt-kv-val" id="dt-current-step">0/0</strong>
+                                        </div>
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">Set Time</span>
+                                            <strong class="dt-kv-val" id="dt-set-time">00:00:00</strong>
+                                        </div>
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">RPM</span>
+                                            <strong class="dt-kv-val" id="dt-rpm">--</strong>
+                                        </div>
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">Temp &deg;C</span>
+                                            <strong class="dt-kv-val" id="dt-temperature">--</strong>
+                                        </div>
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">Sample mL</span>
+                                            <strong class="dt-kv-val" id="dt-sample-volume">--</strong>
+                                        </div>
+                                        <div class="dt-kv">
+                                            <span class="dt-kv-key">Rinse mL</span>
+                                            <strong class="dt-kv-val" id="dt-rinse-volume">--</strong>
+                                        </div>
+                                        <div class="dt-kv dt-kv-wide">
+                                            <span class="dt-kv-key">Power Fail Window</span>
+                                            <strong class="dt-kv-val" id="dt-power-failure">--</strong>
+                                        </div>
+                                    </div>
+                                </aside>
+
+                                <section class="dt-panel dt-panel-timer" aria-label="Step timer">
+                                    <span class="dt-hero-label">Step Timer</span>
+                                    <div class="dt-hero-box" id="dt-hero-timer">00:00:00</div>
+                                    <div class="dt-kv dt-kv-inline" style="display:none;">
+                                        <span class="dt-kv-key">Remaining</span>
+                                        <strong class="dt-kv-val" id="dt-remaining-time">00:00:00</strong>
+                                    </div>
+                                </section>
+
+                                <aside class="dt-panel dt-panel-stirrer" aria-label="Shaft position">
+                                    <div class="dt-panel-title">Shaft Position</div>
+                                    <div class="dt-stirrer-controls">
+                                        <button type="button" class="dt-stirrer-btn dt-stirrer-up" id="dt-stirrer-up" onclick="stirrerUnitCommand('up')">
+                                            <span class="dt-stirrer-glyph" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="28" height="28" focusable="false"><path d="M12 4l8 10H4l8-10z" fill="currentColor"/></svg>
+                                            </span>
+                                            <span class="dt-stirrer-btn-label">Up</span>
+                                        </button>
+                                        <button type="button" class="dt-stirrer-btn dt-stirrer-stop is-active" id="dt-stirrer-stop" onclick="stirrerUnitCommand('stop')">
+                                            <span class="dt-stirrer-glyph" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="26" height="26" focusable="false"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>
+                                            </span>
+                                            <span class="dt-stirrer-btn-label">Stop</span>
+                                        </button>
+                                        <button type="button" class="dt-stirrer-btn dt-stirrer-down" id="dt-stirrer-down" onclick="stirrerUnitCommand('down')">
+                                            <span class="dt-stirrer-glyph" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="28" height="28" focusable="false"><path d="M12 20l-8-10h16l-8 10z" fill="currentColor"/></svg>
+                                            </span>
+                                            <span class="dt-stirrer-btn-label">Down</span>
+                                        </button>
+                                    </div>
+                                    <div class="dt-stirrer-status">Status: <strong id="dt-stirrer-status">Stopped</strong></div>
+                                </aside>
+                            </div>
+
+                            <div class="dt-equip-status" aria-label="Heater, pump and stirrer status">
+                                <div class="dt-equip dt-equip-heater is-off" id="dt-heater-equip" data-on="false">
+                                    <div class="dt-eq-icon" aria-hidden="true">
+                                        <svg viewBox="0 0 48 48" width="40" height="40" focusable="false">
+                                            <g class="dt-htr-waves">
+                                                <path class="dt-htr-wave w1" d="M15 25 q-3.2 -4.5 0 -9 q3.2 -4.5 0 -9" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+                                                <path class="dt-htr-wave w2" d="M24 25 q-3.2 -4.5 0 -9 q3.2 -4.5 0 -9" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+                                                <path class="dt-htr-wave w3" d="M33 25 q-3.2 -4.5 0 -9 q3.2 -4.5 0 -9" fill="none" stroke-width="2.6" stroke-linecap="round"/>
+                                            </g>
+                                            <rect class="dt-htr-bar" x="9" y="31" width="30" height="7" rx="3.5"/>
+                                            <rect class="dt-htr-leg" x="13" y="38" width="4" height="5" rx="1.5"/>
+                                            <rect class="dt-htr-leg" x="31" y="38" width="4" height="5" rx="1.5"/>
+                                        </svg>
+                                    </div>
+                                    <div class="dt-equip-meta">
+                                        <span class="dt-equip-label">Heater</span>
+                                        <strong class="dt-equip-state" id="dt-heater-label">Off</strong>
+                                    </div>
+                                </div>
+                                <div class="dt-equip dt-equip-pump is-off" id="dt-pump-equip" data-on="false">
+                                    <div class="dt-eq-icon" aria-hidden="true">
+                                        <svg viewBox="0 0 48 48" width="40" height="40" focusable="false">
+                                            <g class="dt-pmp-rotor">
+                                                <path class="dt-pmp-arc" d="M24 8 a16 16 0 0 1 15.2 11" fill="none" stroke-width="3.2" stroke-linecap="round"/>
+                                                <path class="dt-pmp-head" d="M40.8 23.8 L42.7 17.7 L36.1 19.9 Z"/>
+                                                <path class="dt-pmp-arc" d="M24 40 a16 16 0 0 1 -15.2 -11" fill="none" stroke-width="3.2" stroke-linecap="round"/>
+                                                <path class="dt-pmp-head" d="M7.2 24.2 L5.3 30.3 L11.9 28.1 Z"/>
+                                            </g>
+                                            <circle class="dt-pmp-hub" cx="24" cy="24" r="6.5" fill="none" stroke-width="3.2"/>
+                                        </svg>
+                                    </div>
+                                    <div class="dt-equip-meta">
+                                        <span class="dt-equip-label">Circulation Pump</span>
+                                        <strong class="dt-equip-state" id="dt-pump-label">Off</strong>
+                                    </div>
+                                </div>
+                                <div class="dt-equip dt-equip-paddle is-off" id="dt-paddle-equip" data-on="false">
+                                    <div class="dt-eq-icon dt-paddle-visual" aria-hidden="true">
+                                        <div class="dt-paddle-rotor" id="dt-paddle-rotor">
+                                            <svg viewBox="0 0 48 48" width="40" height="40" focusable="false">
+                                                <rect class="dt-pdl-shaft" x="22" y="3" width="4" height="27" rx="2"/>
+                                                <rect class="dt-pdl-blade" x="10" y="30" width="28" height="9" rx="3.5"/>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                    <div class="dt-equip-meta">
+                                        <span class="dt-equip-label">Stirrer</span>
+                                        <strong class="dt-equip-state" id="dt-paddle-label">Off</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dt-live-actions">
+                            <p class="dt-status-msg" id="dt-status-msg">Press Preheat to begin.</p>
+                            <button type="button" class="btn btn-secondary" id="dt-back-btn" onclick="dissolutionTestBack()">Back</button>
+                            <button type="button" class="btn btn-secondary" id="dt-pause-btn" onclick="dissolutionTestPause()" style="display:none;">Pause</button>
+                            <button type="button" class="btn btn-primary dt-start-preheat" id="dt-start-btn" onclick="dissolutionTestPrimaryAction()">Preheat</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-vessel-temperature">
+                    <div class="vt-page">
+                        <header class="vt-toolbar">
+                            <div class="vt-inter" id="vt-inter">
+                                <span class="vt-inter-label">Inter-Vessel &Delta;</span>
+                                <strong class="vt-inter-value" id="vt-inter-delta">--</strong>
+                                <span class="vt-inter-hint" id="vt-inter-hint">Highest &minus; Lowest</span>
+                            </div>
+                            <button type="button" class="btn btn-secondary vt-back-btn" onclick="closeVesselTemperaturePage()">Back</button>
+                        </header>
+                        <div class="vt-grid" aria-label="Vessel temperature grid">
+                            <div class="vt-vessel" data-vessel="1" id="vt-vessel-1"></div>
+                            <div class="vt-vessel" data-vessel="2" id="vt-vessel-2"></div>
+                            <div class="vt-vessel" data-vessel="3" id="vt-vessel-3"></div>
+                            <div class="vt-vessel" data-vessel="4" id="vt-vessel-4"></div>
+                            <div class="vt-vessel" data-vessel="5" id="vt-vessel-5"></div>
+                            <div class="vt-vessel" data-vessel="6" id="vt-vessel-6"></div>
+                        </div>
+                    </div>
+                </div>
+
+                            <!-- Password Expired Reset -->
+                <div class="page" id="page-password-expired-reset">
+                    <div class="add-member-container">
+                        <h2 class="section-title" id="password-reset-page-title">Reset Expired Password</h2>
+                        <p class="section-subtitle" id="password-reset-page-subtitle">Your password has expired. Set a new password to continue.</p>
+                        <div class="add-member-form form-grid">
+                            <div class="form-group full-width">
+                                <label>User ID</label>
+                                <input type="text" id="expired-reset-username" class="input-field" readonly>
+                            </div>
+                            <div class="form-group full-width">
+                                <label>Current Password</label>
+                                <input type="password" id="expired-reset-old-password" class="input-field"
+                                    placeholder="Enter current password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group full-width">
+                                <label>New Password</label>
+                                <input type="password" id="expired-reset-new-password" class="input-field"
+                                    placeholder="Enter new password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group full-width">
+                                <label>Confirm New Password</label>
+                                <input type="password" id="expired-reset-confirm-password" class="input-field"
+                                    placeholder="Confirm new password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+                        <div class="add-member-actions members-actions-row">
+                            <button class="btn btn-primary" onclick="submitPasswordResetFromLoginPage()">Update Password</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Create Recipe â€” single page -->
+                <div class="page" id="page-create-recipe-step1">
+                    <div class="add-member-container dissolution-create-recipe" style="max-width: 900px; margin: 0 auto;">
+                        <div class="add-member-form form-grid">
+                            <div class="form-group full-width">
+                                <label for="recipe-product-name">Recipe Name</label>
+                                <input type="text" id="recipe-product-name" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-temperature">Temperature (&deg;C)</label>
+                                <input type="number" id="recipe-temperature" class="input-field" min="20" max="50" step="0.1"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-step-count">Number of Steps</label>
+                                <input type="number" id="recipe-step-count" class="input-field" min="1" max="12" step="1"
+                                    onchange="onDissolutionStepCountChange()"
+                                    oninput="onDissolutionStepCountChange()"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-mode">Sample Drop</label>
+                                <select id="recipe-mode" class="input-field">
+                                    <option value="Auto">Auto</option>
+                                    <option value="Manual">Manual</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-usp">USP</label>
+                                <select id="recipe-usp" class="input-field">
+                                    <option value="USP 1">USP 1</option>
+                                    <option value="USP 2">USP 2</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-media">Media</label>
+                                <input type="text" id="recipe-media" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-media-volume">Media Volume</label>
+                                <input type="text" id="recipe-media-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-media-ph">Media PH</label>
+                                <input type="number" id="recipe-media-ph" class="input-field" min="0" max="14" step="0.01"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-sample-volume">Sample Volume</label>
+                                <input type="text" id="recipe-sample-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-rinse-volume">Flush Volume</label>
+                                <input type="text" id="recipe-rinse-volume" class="input-field"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-replenishment">Replenishment</label>
+                                <select id="recipe-replenishment" class="input-field">
+                                    <option value="Yes">Yes</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="recipe-power-failure">Power Failure (min)</label>
+                                <input type="number" id="recipe-power-failure" class="input-field" min="1" max="60" step="1"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <p class="section-subtitle" id="create-recipe-steps-summary" style="margin-top: 16px;">
+                            After you continue, configure RPM, duration, and sample volume for each step.
+                        </p>
+
+                        <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
+                            <button type="button" class="btn btn-primary" onclick="continueCreateRecipeToSteps()">Continue</button>
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back to Home</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-create-recipe-step2">
+                    <div class="add-member-container dissolution-create-recipe dissolution-create-recipe-step2" style="max-width: 960px; margin: 0 auto;">
+                        <h2 class="section-title">Configure Steps</h2>
+                        <p class="section-subtitle" id="create-recipe-step2-summary">
+                            Temperature applies to every step. Enter RPM, duration (HH:MM:SS), and sample volume for each step.
+                        </p>
+                        <div class="dissolution-steps-header dissolution-steps-header--4col">
+                            <span>Step</span>
+                            <span>RPM</span>
+                            <span>Duration (HH:MM:SS)</span>
+                            <span>Sample Volume</span>
+                        </div>
+                        <div id="create-recipe-steps-list" class="dissolution-steps-list dissolution-steps-list--4col"></div>
+
+                        <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
+                            <button type="button" class="btn btn-primary" onclick="saveDissolutionRecipe()">Save Recipe</button>
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('create-recipe-step1')">Back</button>
+                        </div>
+                    </div>
+                </div>
+
+                            <!-- Manage / Load Recipes -->
+                <div class="page" id="page-manage-recipes">
+                    <div class="manage-recipes-container">
+                        <div id="manage-recipes-main">
+                        <button class="btn-create-recipe" onclick="startRecipeCreation()">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Create New Recipe
+                        </button>
+                        <div class="recipe-list-container">
+                            <p class="empty-state-message" id="manage-recipes-message">No recipes created yet.</p>
+                            <table class="manage-recipes-table" style="display: none;">
+                                <thead>
+                                    <tr>
+                                        <th>Product Name</th>
+                                        <th>Mode / USP</th>
+                                        <th>Temp</th>
+                                        <th>Steps</th>
+                                        <th>Approval</th>
+                                        <th class="actions-col">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="manage-recipes-table-body"></tbody>
+                            </table>
+                        </div>
+                        </div>
+
+                        <!-- Recipe Actions Modal (Edit / Disable / Load) -->
+                        <div id="recipe-actions-modal-overlay" class="modal-overlay" style="display: none;">
+                            <div class="role-modal">
+                                <h3 id="recipe-actions-modal-title">Recipe</h3>
+                                <div class="role-modal-buttons">
+                                    <button type="button" class="btn-role-select btn-role-qa"
+                                        id="recipe-action-approve-btn" style="display: none;"
+                                        onclick="confirmRecipeAction('approve')">Approve</button>
+                                    <button type="button" class="btn-role-select btn-role-admin"
+                                        id="recipe-action-edit-btn" onclick="confirmRecipeAction('edit')">Edit</button>
+                                    <button type="button" class="btn-role-select btn-role-supervisor"
+                                        id="recipe-action-disable-btn"
+                                        onclick="confirmRecipeAction('disable')">Disable</button>
+                                    <button type="button" class="btn-role-select btn-role-user"
+                                        id="recipe-action-load-btn" onclick="confirmRecipeAction('load')">Load</button>
+                                    <button type="button" class="btn-role-select btn-role-cancel"
+                                        onclick="closeRecipeActionsModal()">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="recipe-approve-overlay" class="modal-overlay" style="display: none;">
+                            <div class="role-modal">
+                                <h3>Approve recipe</h3>
+                                <div class="form-group full-width">
+                                    <label for="recipe-approve-remarks">Remarks (optional)</label>
+                                    <textarea id="recipe-approve-remarks" class="input-field" rows="3" placeholder="Approval remarks"></textarea>
+                                </div>
+                                <div class="role-modal-buttons">
+                                    <button type="button" class="btn-role-select btn-role-user" onclick="submitRecipeApprove()">Submit</button>
+                                    <button type="button" class="btn-role-select btn-role-cancel" onclick="closeRecipeApproveModal()">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- AR + Batch Number Modal (for Load Recipe / Quick Test start) -->
+                        <div id="batch-number-modal" class="modal-overlay param-config-modal" style="display: none;">
+                            <div class="role-modal">
+                                <h3 class="param-config-modal-title">Enter AR Number &amp; Batch Number</h3>
+                                <div class="form-group">
+                                    <label for="load-recipe-ar-input">AR Number</label>
+                                    <input type="text" id="load-recipe-ar-input" class="input-field" placeholder="Enter AR number"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                </div>
+                                <div class="form-group">
+                                    <label for="load-recipe-batch-input">Batch Number</label>
+                                    <input type="text" id="load-recipe-batch-input" class="input-field" placeholder="Enter batch number"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                </div>
+                                <div class="role-modal-buttons">
+                                    <button type="button" class="btn-role-select btn-role-cancel" onclick="closeBatchNumberModal()">Cancel</button>
+                                    <button type="button" class="btn-role-select btn-role-user" onclick="confirmBatchNumberAndLoad()">Continue</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Disable Recipes Page -->
+                <div class="page" id="page-disable-recipes">
+                    <div class="manage-recipes-container">
+                        <h2 class="section-title">Disable Recipes</h2>
+                        <p class="section-subtitle">View recipes that were disabled (removed from normal use).</p>
+                        <div class="recipe-list-container">
+                            <p class="empty-state-message" id="disable-recipes-message">No recipes available.</p>
+                            <table class="manage-recipes-table disable-recipes-table" style="display: none;">
+                                <thead>
+                                    <tr>
+                                        <th>Product</th>
+                                        <th>Mode / USP</th>
+                                        <th>Steps</th>
+                                        <th class="actions-col">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="disable-recipes-table-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="validation-actions-row">
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('settings')">Back</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reports Page -->
+                <div class="page" id="page-reports">
+                    <div class="reports-container reports-page-layout">
+                        <div class="reports-filter-buttons">
+                            <button class="reports-filter-btn reports-filter-test" onclick="filterReports('test')">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
+                                <span>Test Reports</span>
+                            </button>
+                            <button class="reports-filter-btn reports-filter-validation"
+                                onclick="filterReports('validation')">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                                <span>Validation Reports</span>
+                            </button>
+                            <button class="reports-filter-btn reports-filter-calibration"
+                                onclick="filterReports('calibration')">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                                <span>Calibration Reports</span>
+                            </button>
+                            <button class="reports-filter-btn reports-filter-audit" onclick="filterReports('audit')">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <path d="M16 13H8"></path>
+                                    <path d="M16 17H8"></path>
+                                    <path d="M10 9H8"></path>
+                                </svg>
+                                <span>Audit Trails</span>
+                            </button>
+                            <button class="reports-filter-btn reports-filter-export" onclick="exportFilteredReports()">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span>Export Reports</span>
+                            </button>
+                            <button class="reports-filter-btn reports-filter-recipes" onclick="viewRecipe()">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                </svg>
+                                <span>View Recipe</span>
+                            </button>
+                        </div>
+                        <div id="audit-filters-bar" class="audit-filters-bar" style="display: none;">
+                            <label>User</label>
+                            <select id="audit-filter-user">
+                                <option value="">All</option>
+                            </select>
+                            <label>Role</label>
+                            <select id="audit-filter-role">
+                                <option value="">All</option>
+                                <option value="Admin">Admin</option>
+                                <option value="Supervisor">Reviewer</option>
+                                <option value="QA">QA</option>
+                                <option value="User">User</option>
+                                <option value="--">--</option>
+                            </select>
+                            <label>Action</label>
+                            <select id="audit-filter-action">
+                                <option value="">All</option>
+                            </select>
+                            <label>From</label>
+                            <input type="date" id="audit-filter-from-date">
+                            <input type="time" id="audit-filter-from-time">
+                            <label>To</label>
+                            <input type="date" id="audit-filter-to-date">
+                            <input type="time" id="audit-filter-to-time">
+                            <button type="button" class="btn btn-primary audit-filter-apply" onclick="applyAuditFiltersAndRefresh()">Apply</button>
+                            <button type="button" class="btn btn-secondary audit-filter-export" onclick="exportAuditTrails()">Export Audit Trails</button>
+                        </div>
+                        <table class="reports-table">
+                            <thead>
+                                <tr id="reports-thead-row">
+                                    <th>SL No</th>
+                                    <th>Report Name</th>
+                                    <th>Creation Time</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reports-table-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Export Selection Page -->
+                <div class="page" id="page-export">
+                    <div class="validation-main-container">
+                        <p class="section-subtitle">Select what you want to export</p>
+                        <div class="validation-settings-grid" style="max-width: 600px;">
+                            <button class="settings-card settings-datetime" onclick="exportFromSelection('reports')" style="width: 100%;">
+                                <div class="settings-icon">
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"></path>
+                                        <polyline points="14 2 14 7 19 7"></polyline>
+                                        <line x1="9" y1="12" x2="15" y2="12"></line>
+                                        <line x1="9" y1="16" x2="15" y2="16"></line>
+                                    </svg>
+                                </div>
+                                <h3>Reports</h3>
+                                <p>Export currently filtered report list</p>
+                            </button>
+                            <button id="export-audit-trails-card" class="settings-card settings-recipes" onclick="exportFromSelection('audit')" style="width: 100%;">
+                                <div class="settings-icon">
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                        <line x1="7" y1="9" x2="17" y2="9"></line>
+                                        <line x1="7" y1="13" x2="17" y2="13"></line>
+                                        <line x1="7" y1="17" x2="13" y2="17"></line>
+                                    </svg>
+                                </div>
+                                <h3>Audit Trails</h3>
+                                <p>Export filtered audit trail entries</p>
+                            </button>
+                        </div>
+                        <div class="validation-actions-row" style="margin-top: 32px;">
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('reports')">Back to Reports</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Preview Page -->
+                <div class="page" id="page-report-preview">
+                    <div class="reports-container" style="overflow-y: auto;">
+                        <div id="report-pending-lock-banner" class="report-pending-lock-banner" style="display: none;"><strong>Awaiting approval.</strong> A Reviewer or Admin must complete Pass/Fail and sign below. You cannot leave, log out, or open Profile until the report is approved.</div>
+                        <div class="report-preview-container report-print-template" id="report-content">
+                            <h1>RAISE LAB EQUIPMENT</h1>
+                            <h2>DISSOLUTION TESTER - TEST REPORT</h2>
+                            <h2 id="report-company-name">COMPANY NAME</h2>
+                            <table class="report-ident-table">
+                                <tr>
+                                    <th>Model No</th>
+                                    <td id="report-model-no"></td>
+                                    <th>Serial No</th>
+                                    <td id="report-serial-no"></td>
+                                </tr>
+                                <tr>
+                                    <th>Location</th>
+                                    <td id="report-location"></td>
+                                    <th>Instrument No</th>
+                                    <td id="report-instrument-no"></td>
+                                </tr>
+                                <tr>
+                                    <th>Last Validation Date</th>
+                                    <td id="report-previous-val"></td>
+                                    <th>Next Validation Due</th>
+                                    <td id="report-next-validation"></td>
+                                </tr>
+                            </table>
+                            <!-- Validation details (shown only for validation reports) -->
+                            <div id="report-validation-calibration-section" style="display: none;">
+                                <h3 id="report-validation-calibration-title">VALIDATION DETAILS</h3>
+                                <table class="report-ident-table" id="report-validation-calibration-table">
+                                    <tbody id="report-validation-calibration-body"></tbody>
+                                </table>
+                            </div>
+                            <div id="report-test-sections">
+                                <h3>TEST DETAILS</h3>
+                                <table class="report-info-table">
+                                    <tr>
+                                        <th>TEST DATE</th>
+                                        <td id="report-test-date"></td>
+                                        <th>TIME</th>
+                                        <td id="report-test-time"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>RECIPE NO.</th>
+                                        <td id="report-recipe-no" colspan="3"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>TEST METHOD</th>
+                                        <td id="report-test-method"></td>
+                                        <th>SET TEMP</th>
+                                        <td id="report-set-temp"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>SAMPLE DROP</th>
+                                        <td id="report-sample-drop" colspan="3"></td>
+                                    </tr>
+                                </table>
+                                <h3>PRODUCT DETAILS</h3>
+                                <table class="report-info-table">
+                                    <tr>
+                                        <th>PRODUCT NAME</th>
+                                        <td id="report-product-name" colspan="3"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>BATCH NUMBER</th>
+                                        <td id="report-batch-number" colspan="3"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>TOTAL STEPS NO</th>
+                                        <td id="report-total-steps"></td>
+                                        <th>MEDIA VOLUME</th>
+                                        <td id="report-media-volume"></td>
+                                    </tr>
+                                    <tr>
+                                        <th>MEDIA PH</th>
+                                        <td id="report-media-ph" colspan="3"></td>
+                                    </tr>
+                                </table>
+                                <h3>STEP DETAILS</h3>
+                                <table class="report-test-data-table" id="report-step-details-table">
+                                    <thead>
+                                        <tr>
+                                            <th>STEP</th>
+                                            <th>RPM</th>
+                                            <th>DURATION</th>
+                                            <th>STEP</th>
+                                            <th>RPM</th>
+                                            <th>DURATION</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="report-step-details-body"></tbody>
+                                </table>
+                                <h3>Comments</h3>
+                                <div class="report-remarks-box" id="report-remarks-box"></div>
+                                <h3>TEST RESULTS</h3>
+                                <table class="report-test-data-table" id="report-test-data-table">
+                                    <thead>
+                                        <tr id="report-test-data-header">
+                                            <th>Sl.No.</th>
+                                            <th>Time</th>
+                                            <th>RPM</th>
+                                            <th>Set Temp.</th>
+                                            <th>Bath Temp.</th>
+                                            <th>Deviation</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="report-test-data-body"></tbody>
+                                </table>
+                                <h3 id="report-test-completed-title">TEST COMPLETED</h3>
+                                <table class="report-info-table">
+                                    <tr>
+                                        <th>TOTAL TEST DURATION</th>
+                                        <td id="report-test-duration"></td>
+                                        <th>TEST STATUS</th>
+                                        <td id="report-test-status"></td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <table class="report-approval-table">
+                                <tr>
+                                    <th>Operated By</th>
+                                    <td id="report-operated-by"></td>
+                                    <th>Employee ID</th>
+                                    <td id="report-employee-id"></td>
+                                </tr>
+                                <tr>
+                                    <th>Result</th>
+                                    <td id="report-approval-result"></td>
+                                    <th>Approved By</th>
+                                    <td id="report-approved-by"></td>
+                                </tr>
+                                <tr>
+                                    <th>Approved At</th>
+                                    <td id="report-approved-at" colspan="3"></td>
+                                </tr>
+                            </table>
+                            <table class="report-info-table" id="report-printed-stamp" style="margin-top: 12px;">
+                                <tr>
+                                    <th>Printed Date</th>
+                                    <td id="report-printed-date"></td>
+                                    <th>Printed Time</th>
+                                    <td id="report-printed-time"></td>
+                                </tr>
+                            </table>
+                            <div id="report-approve-panel" class="report-approve-panel" style="display: none;">
+                                <h3 id="report-approve-panel-title">Test report approval</h3>
+                                <p class="section-subtitle">Reviewer or Admin: select Pass or Fail and add approval remarks.</p>
+                                <p id="report-approve-operator-hint" class="report-approve-operator-hint" style="display: none;">You cannot approve your own report. Ask a Reviewer or Admin to sign below.</p>
+                                <div class="form-group report-approve-passfail-group">
+                                    <span class="report-approve-passfail-label">Outcome</span>
+                                    <div class="report-approve-passfail-cards" role="radiogroup" aria-label="Pass or Fail">
+                                        <label class="report-approve-card-wrap">
+                                            <input type="radio" name="report-approve-pass-fail" value="PASS" checked class="report-approve-pf-input">
+                                            <span class="report-approve-card">Pass</span>
+                                        </label>
+                                        <label class="report-approve-card-wrap">
+                                            <input type="radio" name="report-approve-pass-fail" value="FAIL" class="report-approve-pf-input">
+                                            <span class="report-approve-card">Fail</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="form-group full-width">
+                                    <label for="report-approve-remarks-input">Approval remarks</label>
+                                    <textarea id="report-approve-remarks-input" class="input-field" rows="3" placeholder="Approval remarks"></textarea>
+                                </div>
+                                <h4 class="report-approve-signature-heading">Electronic signature (Reviewer / Admin)</h4>
+                                <div id="report-approve-credentials-block" class="report-approve-credentials-block">
+                                    <div class="report-approve-signature-fields form-grid">
+                                        <div class="form-group full-width">
+                                            <label for="report-approve-verifier-username">Verifier User ID</label>
+                                            <input type="text" id="report-approve-verifier-username" class="input-field report-approve-verifier-field" placeholder="Reviewer or Admin User ID" autocomplete="off">
+                                        </div>
+                                        <div class="form-group full-width">
+                                            <label for="report-approve-verifier-password">Verifier password</label>
+                                            <input type="password" id="report-approve-verifier-password" class="input-field report-approve-verifier-field" placeholder="Password" autocomplete="off">
+                                        </div>
+                                    </div>
+                                    <button type="button" id="btn-report-approve-submit" class="btn btn-primary report-approve-submit-credentials" onclick="submitReportApprove()">Submit approval</button>
+                                </div>
+                                <div id="report-approve-biometric-wrap" class="report-approve-biometric-wrap">
+                                    <button type="button" id="btn-report-approve-biometric" class="report-approve-biometric-btn" onclick="submitReportApproveBiometric()">
+                                        <div class="biometric-icon report-approve-biometric-icon" aria-hidden="true">
+                                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M18.9 7a8 8 0 0 0-5.3-3.8A8 8 0 0 0 4 12"></path>
+                                                <path d="M12 20a8 8 0 0 0 8-8 4.5 4.5 0 0 0-1-2.8"></path>
+                                                <path d="M9.1 4.6A8 8 0 0 0 4.5 9.4"></path>
+                                                <path d="M12 12a4 4 0 0 0-4 4"></path>
+                                            </svg>
+                                        </div>
+                                        <span>Use fingerprint</span>
+                                    </button>
+                                </div>
+                                <p id="report-approve-verify-error" class="report-approve-verify-error" style="display: none;"></p>
+                                <button type="button" id="btn-report-approve-biometric-retry" class="btn btn-secondary report-approve-biometric-retry" style="display: none;" onclick="submitReportApproveBiometric()">Try again</button>
+                            </div>
+                        </div>
+                        <div class="report-preview-actions" id="report-preview-actions">
+                            <div class="report-preview-print-export-group" id="report-preview-print-export-group">
+                                <button class="btn-print" onclick="handlePrintReport()">Print A4</button>
+                                <button class="btn-export" onclick="handleExportReport()">Export to USB</button>
+                            </div>
+                            <button class="btn-close" onclick="goToPage('reports')">Close</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- View Recipe Page -->
+                <div class="page" id="page-view-recipes">
+                    <div class="reports-container reports-page-layout">
+                        <h2 class="view-recipes-title">View Recipe</h2>
+                        <table class="reports-table view-recipes-table">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th class="view-col">View</th>
+                                </tr>
+                            </thead>
+                            <tbody id="view-recipes-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recipe Print Preview Page -->
+                <div class="page" id="page-recipe-print-preview">
+                    <div class="reports-container" style="overflow-y: auto;">
+                        <div class="report-preview-container recipe-print-container" id="recipe-print-content">
+                            <h1>RAISE LAB EQUIPMENT</h1>
+                            <h2>Dissolution Tester - Recipe</h2>
+                            <h2 id="recipe-print-company-name">COMPANY NAME</h2>
+                            <table class="report-ident-table">
+                                <tr>
+                                    <th>Model No</th>
+                                    <td id="recipe-print-model-no"></td>
+                                    <th>Serial No</th>
+                                    <td id="recipe-print-serial-no"></td>
+                                </tr>
+                                <tr>
+                                    <th>Location</th>
+                                    <td id="recipe-print-location"></td>
+                                    <th>Instrument No</th>
+                                    <td id="recipe-print-instrument-no"></td>
+                                </tr>
+                                <tr>
+                                    <th>Last Validation Date</th>
+                                    <td id="recipe-print-previous-val"></td>
+                                    <th>Next Validation Due</th>
+                                    <td id="recipe-print-next-validation"></td>
+                                </tr>
+                            </table>
+                            <h3 id="recipe-print-product">Product Name</h3>
+                            <table>
+                                <tr>
+                                    <th>USP</th>
+                                    <td id="recipe-print-usp"></td>
+                                </tr>
+                                <tr>
+                                    <th>Speed (RPM)</th>
+                                    <td id="recipe-print-speed"></td>
+                                </tr>
+                            </table>
+                            <h3 style="margin-top: 1rem;">Recipe Summary</h3>
+                            <table class="recipe-print-tolerance-table">
+                                <thead>
+                                    <tr>
+                                        <th>Parameter</th>
+                                        <th>Value</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recipe-print-tolerance-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="report-preview-actions">
+                            <button class="btn-print" onclick="handlePrintRecipeA4()">Print A4</button>
+                            <button class="btn-close" onclick="goToPage('view-recipes')">Close</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Validation landing -->
+                <div class="page" id="page-validate">
+                    <div class="test-options test-options-two">
+                        <div class="test-card" onclick="goToPage('validate-type-select')" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                </svg>
+                            </div>
+                            <h2>Validation</h2>
+                            <p>Temperature, RPM, and physical parameter checks</p>
+                        </div>
+                        <div class="test-card" onclick="openDissolutionCalibration()" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                            </div>
+                            <h2>Calibration</h2>
+                            <p>Apparatus calibration procedures</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-validate-type-select">
+                    <div class="test-options">
+                        <div class="test-card" onclick="openDissolutionValidationOption('temperature')" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+                                </svg>
+                            </div>
+                            <h2>Temperature Validation</h2>
+                            <p>Validate bath and vessel temperature</p>
+                        </div>
+                        <div class="test-card" onclick="openDissolutionValidationOption('rpm')" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </div>
+                            <h2>RPM Validation</h2>
+                            <p>Validate paddle / basket speed</p>
+                        </div>
+                        <div class="test-card" onclick="openDissolutionValidationOption('physical')" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                                </svg>
+                            </div>
+                            <h2>Physical Parameters</h2>
+                            <p>Validate physical apparatus parameters</p>
+                        </div>
+                        <div class="test-card" onclick="openDissolutionValidationOption('sample-volume')" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M8 2h8"></path>
+                                    <path d="M9 2v3.5L5.5 14a5 5 0 0 0 4.5 7h4a5 5 0 0 0 4.5-7L15 5.5V2"></path>
+                                    <path d="M8.5 14h7"></path>
+                                </svg>
+                            </div>
+                            <h2>Sample Volume Validation</h2>
+                            <p>Validate dispensed sample volume</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-temperature-validation">
+                    <div class="add-member-container temp-val-page disso-temp-val-suite" style="max-width: 720px; margin: 0 auto;">
+                        <h2 class="section-title">Temperature Validation</h2>
+                        <p class="section-subtitle" id="temp-val-subtitle">Live bath and external probe. Press Start to stabilize for 3 minutes, then enter the measured thermometer reading.</p>
+
+                        <div class="temp-val-bath-card" id="temp-val-bath-card">
+                            <div class="temp-val-bath-row temp-val-bath-row--live">
+                                <div class="temp-val-live-box temp-val-live-box--bath">
+                                    <span class="temp-val-live-label">Bath</span>
+                                    <strong id="temp-val-bath-live" class="temp-val-live-value">--.- °C</strong>
+                                </div>
+                                <div class="temp-val-live-box temp-val-live-box--external">
+                                    <span class="temp-val-live-label">External</span>
+                                    <strong id="temp-val-external-live" class="temp-val-live-value">--.- °C</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="disso-hold-stage" id="temp-val-hold-stage" style="display: none;" aria-live="polite">
+                            <div class="dt-temp-hold-ring" id="temp-val-hold-ring">
+                                <div class="dt-temp-hold-ring-inner">
+                                    <p class="dt-temp-hold-label" id="temp-val-hold-label">Stabilizing</p>
+                                    <p class="dt-temp-hold-time" id="temp-val-hold-time">03:00</p>
+                                </div>
+                            </div>
+                            <p class="dt-temp-status-line" id="temp-val-status">Stabilizing…</p>
+                        </div>
+
+                        <div class="temp-val-measured-wrap" id="temp-val-measured-wrap" style="display: none;">
+                            <div class="form-group">
+                                <label for="temp-val-measured">Measured Temperature (°C)</label>
+                                <input type="number" id="temp-val-measured" class="input-field" min="15" max="55" step="0.1"
+                                    inputmode="decimal" placeholder="Thermometer reading"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <div class="add-member-actions members-actions-row val-suite-actions" style="margin-top: 24px;">
+                            <button type="button" class="btn btn-primary" id="temp-val-primary-btn" onclick="onTemperatureValidationPrimary()">Start</button>
+                            <button type="button" class="btn btn-primary" id="temp-val-next-btn" onclick="onTemperatureValidationNext()" disabled>Next</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-temperature-validation-result" style="display: none;">
+                    <div class="add-member-container" style="max-width: 640px; margin: 0 auto;">
+                        <p class="section-subtitle">Temperature validation continues in the suite flow.</p>
+                        <button type="button" class="btn btn-secondary" onclick="goToPage('validate-type-select')">Back</button>
+                    </div>
+                </div>
+
+                                <div class="page" id="page-rpm-validation">
+                    <div class="rpm-val-page rpm-val-page--suite">
+                        <p class="rpm-val-lead">Set target RPM, then Start Validation. Measure with a tachometer during the 1-minute timer.</p>
+                        <div class="rpm-val-main">
+                            <div class="rpm-val-target-block">
+                                <label for="rpm-val-target">Target RPM</label>
+                                <div class="rpm-val-input-row">
+                                    <input type="number" id="rpm-val-target" class="input-field rpm-val-input-lg" min="1" max="300" step="1"
+                                        value="50" inputmode="numeric"
+                                        aria-label="Target RPM"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                    <span class="rpm-val-unit" aria-hidden="true">RPM</span>
+                                </div>
+                                <input type="hidden" id="rpm-val-tachometer" value="">
+                            </div>
+                            <div class="rpm-val-timer-block" id="rpm-val-timer-block" aria-live="polite">
+                                <div class="rpm-val-timer-label">Validation timer</div>
+                                <div class="rpm-val-timer" id="rpm-val-timer">01:00</div>
+                                <div class="rpm-val-timer-hint" id="rpm-val-timer-hint">Press Start Validation to begin</div>
+                            </div>
+                            <div class="rpm-val-shaft-compact" aria-label="Shaft position">
+                                <div class="rpm-val-section-label">Shaft</div>
+                                <div class="rpm-val-shaft-controls rpm-val-shaft-row" role="group">
+                                    <button type="button" class="dt-stirrer-btn dt-stirrer-up" id="rpm-val-shaft-up" onclick="rpmValShaftCommand('up')"><span class="dt-stirrer-btn-label">Up</span></button>
+                                    <button type="button" class="dt-stirrer-btn dt-stirrer-stop is-active" id="rpm-val-shaft-stop" onclick="rpmValShaftCommand('stop')"><span class="dt-stirrer-btn-label">Stop</span></button>
+                                    <button type="button" class="dt-stirrer-btn dt-stirrer-down" id="rpm-val-shaft-down" onclick="rpmValShaftCommand('down')"><span class="dt-stirrer-btn-label">Down</span></button>
+                                </div>
+                                <div class="rpm-val-shaft-status">Status: <strong id="rpm-val-shaft-status">Stopped</strong></div>
+                            </div>
+                        </div>
+                        <div class="rpm-val-footer-actions">
+                            <button type="button" class="btn btn-primary rpm-val-btn-lg" id="rpm-val-primary-btn" onclick="onRpmValidationPrimary()">Start Validation</button>
+                            <button type="button" class="btn btn-primary rpm-val-btn-lg" id="rpm-val-next-btn" onclick="onRpmValidationNext()" disabled>Next</button>
+                        </div>
+                    </div>
+                </div>
+
+<div class="page" id="page-rpm-validation-result">
+                    <div class="add-member-container temp-val-result-page" style="max-width: 720px; margin: 0 auto;">
+                        <h2 class="section-title">Test Data</h2>
+                        <p class="section-subtitle">RPM validation results. Review the test data, then open the validation report.</p>
+
+                        <div id="rpm-val-result-banner" class="temp-val-result-banner" aria-live="polite">
+                            <span id="rpm-val-result-banner-status">—</span>
+                            <span id="rpm-val-result-banner-note" class="temp-val-result-banner-note"></span>
+                        </div>
+
+                        <div class="temp-val-result-summary">
+                            <div class="temp-val-result-summary-item">
+                                <span class="temp-val-live-label">Target</span>
+                                <strong id="rpm-val-result-target">—</strong>
+                            </div>
+                            <div class="temp-val-result-summary-item">
+                                <span class="temp-val-live-label">Tachometer</span>
+                                <strong id="rpm-val-result-tachometer">—</strong>
+                            </div>
+                            <div class="temp-val-result-summary-item">
+                                <span class="temp-val-live-label">Δ</span>
+                                <strong id="rpm-val-result-delta">—</strong>
+                            </div>
+                        </div>
+
+                        <div class="temp-val-result-table-wrap">
+                            <table class="temp-val-result-table" aria-label="RPM validation test data">
+                                <thead>
+                                    <tr>
+                                        <th>Channel</th>
+                                        <th>Tachometer RPM</th>
+                                        <th>Δ vs target</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rpm-val-result-tbody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
+                            <button type="button" class="btn btn-primary" id="rpm-val-open-report-btn"
+                                onclick="openRpmValidationReport()">Open Validation Report</button>
+                            <button type="button" class="btn btn-secondary"
+                                onclick="goToPage('rpm-validation')">Back to Validation</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-physical-parameters">
+                    <div class="add-member-container phys-params-page">
+                        <h2 class="section-title">Physical Parameters</h2>
+                        <p class="section-subtitle">Review USP apparatus limits and specifications, then acknowledge.</p>
+
+                        <div class="phys-params-content" aria-label="Physical parameters">
+                            <section class="phys-params-card phys-params-card--with-figure" aria-labelledby="phys-vessel-title">
+                                <header class="phys-params-card-head">
+                                    <h3 id="phys-vessel-title">Vessel</h3>
+                                    <span class="phys-params-card-tag">Apparatus</span>
+                                </header>
+                                <div class="phys-params-card-body">
+                                    <figure class="phys-params-figure">
+                                        <img src="assets/vessel-dimensions.png" alt="Vessel dimension drawing"
+                                            class="phys-params-figure-img" draggable="false">
+                                    </figure>
+                                    <div class="phys-params-card-spec">
+                                        <dl class="phys-params-dl">
+                                            <div class="phys-params-row">
+                                                <dt>Material</dt>
+                                                <dd>Borosilicate glass or other inert, transparent material</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Shape</dt>
+                                                <dd>Cylindrical, hemispherical bottom</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Nominal capacity</dt>
+                                                <dd>1000 mL (500 / 2000 / 4000 mL also used)</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Height</dt>
+                                                <dd>160–210 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Internal diameter</dt>
+                                                <dd>98–106 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Vessel cover</dt>
+                                                <dd>Evaporation cover with ports for sampling, thermometer, and paddle/shaft</dd>
+                                            </div>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="phys-params-card phys-params-card--with-figure" aria-labelledby="phys-stirring-title">
+                                <header class="phys-params-card-head">
+                                    <h3 id="phys-stirring-title">Stirring element</h3>
+                                    <span class="phys-params-card-tag">Apparatus 2 · Paddle</span>
+                                </header>
+                                <div class="phys-params-card-body">
+                                    <figure class="phys-params-figure">
+                                        <img src="assets/stirring-element-paddle.png" alt="Paddle stirring element dimension drawing"
+                                            class="phys-params-figure-img" draggable="false">
+                                    </figure>
+                                    <div class="phys-params-card-spec">
+                                        <dl class="phys-params-dl">
+                                            <div class="phys-params-row">
+                                                <dt>Parameter</dt>
+                                                <dd>Paddle (USP Apparatus 2)</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Shaft diameter</dt>
+                                                <dd>9.4–10.1 mm (before coating)</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Blade width</dt>
+                                                <dd>74.0–75.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Blade height</dt>
+                                                <dd>35.8 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Flat bottom</dt>
+                                                <dd>42.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Blade thickness</dt>
+                                                <dd>4.0 ± 1.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Outer radius</dt>
+                                                <dd>41.5 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Material</dt>
+                                                <dd>303 stainless steel (or equivalent)</dd>
+                                            </div>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="phys-params-card phys-params-card--with-figure" aria-labelledby="phys-basket-title">
+                                <header class="phys-params-card-head">
+                                    <h3 id="phys-basket-title">Stirring element</h3>
+                                    <span class="phys-params-card-tag">Apparatus 1 · Basket</span>
+                                </header>
+                                <div class="phys-params-card-body">
+                                    <figure class="phys-params-figure">
+                                        <img src="assets/stirring-element-basket.png" alt="Basket stirring element dimension drawing"
+                                            class="phys-params-figure-img" draggable="false">
+                                    </figure>
+                                    <div class="phys-params-card-spec">
+                                        <dl class="phys-params-dl">
+                                            <div class="phys-params-row">
+                                                <dt>Parameter</dt>
+                                                <dd>Basket (USP Apparatus 1)</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Shaft diameter</dt>
+                                                <dd>6.3–6.5 mm or 9.4–10.1 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Vent hole</dt>
+                                                <dd>2.0 ± 0.5 mm diameter</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Retention spring</dt>
+                                                <dd>3 tangs on 120° centers; 5.1 ± 0.5 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Clear opening</dt>
+                                                <dd>20.2 ± 0.1 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Basket height</dt>
+                                                <dd>37.0 ± 3.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Open screen</dt>
+                                                <dd>27.0 ± 1.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Screen O.D.</dt>
+                                                <dd>22.2 ± 1.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>I.D. / O.D.</dt>
+                                                <dd>20.2 ± 1.0 mm / 25.0 ± 3.0 mm</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Mesh</dt>
+                                                <dd>40×40 (0.40 ± 0.04 mm openings); or 20×20 when specified</dd>
+                                            </div>
+                                            <div class="phys-params-row">
+                                                <dt>Runout at A</dt>
+                                                <dd>±1.0 mm max when rotated on centerline</dd>
+                                            </div>
+                                        </dl>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="phys-params-card">
+                                <header class="phys-params-card-head">
+                                    <h3>Positioning</h3>
+                                    <span class="phys-params-card-tag">Geometry</span>
+                                </header>
+                                <dl class="phys-params-dl">
+                                    <div class="phys-params-row">
+                                        <dt>Bottom clearance</dt>
+                                        <dd>25 ± 2 mm (paddle/basket to vessel bottom)</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Shaft centering</dt>
+                                        <dd>±2 mm within vessel</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Vertical alignment</dt>
+                                        <dd>Vertical shaft, minimal wobble</dd>
+                                    </div>
+                                </dl>
+                            </section>
+
+                            <section class="phys-params-card">
+                                <header class="phys-params-card-head">
+                                    <h3>Temperature control</h3>
+                                    <span class="phys-params-card-tag">Thermal</span>
+                                </header>
+                                <dl class="phys-params-dl">
+                                    <div class="phys-params-row">
+                                        <dt>Operating range</dt>
+                                        <dd>Ambient to 45°C (typical 37 ± 0.5°C)</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Bath type</dt>
+                                        <dd>Circulating water bath or heater jacket</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Uniformity</dt>
+                                        <dd>±0.5°C across vessels</dd>
+                                    </div>
+                                </dl>
+                            </section>
+
+                            <section class="phys-params-card">
+                                <header class="phys-params-card-head">
+                                    <h3>Sampling</h3>
+                                    <span class="phys-params-card-tag">Collection</span>
+                                </header>
+                                <dl class="phys-params-dl">
+                                    <div class="phys-params-row">
+                                        <dt>Probe position</dt>
+                                        <dd>Midway between medium surface and top of basket/paddle</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Wall clearance</dt>
+                                        <dd>≥ 1 cm from vessel wall</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Volume / replace</dt>
+                                        <dd>Manual or auto-sampler compatible</dd>
+                                    </div>
+                                    <div class="phys-params-row">
+                                        <dt>Filtration</dt>
+                                        <dd>e.g. 0.45 µm filter pore size</dd>
+                                    </div>
+                                </dl>
+                            </section>
+                        </div>
+
+                        <div class="phys-params-footer">
+                            <label class="phys-params-agree" for="phys-params-agree">
+                                <input type="checkbox" id="phys-params-agree"
+                                    onchange="updatePhysicalParametersDoneState()">
+                                <span>I have read and acknowledge all physical parameters</span>
+                            </label>
+                            <div class="add-member-actions members-actions-row">
+                                <button type="button" class="btn btn-primary" id="phys-params-done-btn"
+                                    onclick="confirmPhysicalParameters()" disabled>Next</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-sample-volume-validation">
+                    <div class="add-member-container sv-val-page sv-val-page--suite" style="max-width: 640px; margin: 0 auto;">
+                        <h2 class="section-title">Sample Volume Validation</h2>
+                        <p class="section-subtitle">Set target and tolerance, then Start. When the sampler is ready, enter the measured volume.</p>
+
+                        <div class="sv-val-form-grid">
+                            <div class="form-group">
+                                <label for="sv-val-target">Target Volume (mL)</label>
+                                <input type="number" id="sv-val-target" class="input-field" min="0.1" max="1000" step="0.1"
+                                    value="10" placeholder="e.g. 10"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label for="sv-val-tolerance">Tolerance (± mL)</label>
+                                <input type="number" id="sv-val-tolerance" class="input-field" min="0" max="500" step="0.1"
+                                    value="10" placeholder="e.g. 10"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <p class="sv-val-status-line" id="sv-val-status" aria-live="polite">Ready</p>
+
+                        <div class="add-member-actions members-actions-row val-suite-actions" style="margin-top: 20px;">
+                            <button type="button" class="btn btn-primary" id="sv-val-primary-btn" onclick="onSampleVolumeValidationPrimary()">Start</button>
+                            <button type="button" class="btn btn-primary" id="sv-val-next-btn" onclick="onSampleVolumeValidationNext()" disabled>Next</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-sample-volume-validation-result">
+                    <div class="add-member-container sv-val-result-fit" style="max-width: 640px; margin: 0 auto;">
+                        <h2 class="section-title">Sample Volume Result</h2>
+                        <div id="sv-val-result-banner" class="temp-val-result-banner" aria-live="polite">
+                            <span id="sv-val-result-banner-status">—</span>
+                            <span id="sv-val-result-banner-note" class="temp-val-result-banner-note"></span>
+                        </div>
+                        <div class="sv-val-result-compact">
+                            <div><span class="temp-val-live-label">Target</span> <strong id="sv-val-result-target">—</strong></div>
+                            <div><span class="temp-val-live-label">Tolerance</span> <strong id="sv-val-result-tolerance">—</strong></div>
+                            <div><span class="temp-val-live-label">Measured</span> <strong id="sv-val-result-measured">—</strong></div>
+                            <div><span class="temp-val-live-label">Result</span> <strong id="sv-val-result-overall">—</strong></div>
+                        </div>
+                        <div class="add-member-actions members-actions-row" style="margin-top: 16px;">
+                            <button type="button" class="btn btn-primary" onclick="continueAfterSampleVolumeResult()">Continue</button>
+                        </div>
+                    </div>
+                </div>
+
+                                <div class="page" id="page-validation-suite-review">
+                    <div class="val-suite-review-page">
+                        <p class="val-suite-review-lead">All validation steps are complete. Save to generate the combined validation report.</p>
+                        <div id="val-suite-review-summary" class="val-suite-review-summary"></div>
+                        <div class="val-suite-review-actions">
+                            <button type="button" class="btn btn-primary" id="val-suite-save-btn" onclick="saveValidationSuiteReport()">Save</button>
+                        </div>
+                    </div>
+                </div>
+
+<div class="page" id="page-calibration">
+                    <div class="temp-cal-page disso-temp-cal-suite">
+                        <h2 class="section-title">Temperature Calibration</h2>
+                        <p class="section-subtitle">Press Start, wait 3 minutes to stabilize, enter the reference thermometer value, then Calibrate bath and external.</p>
+
+                        <div class="disso-cal-live-row">
+                            <div class="temp-val-live-box">
+                                <span class="temp-val-live-label">Bath</span>
+                                <strong id="temp-cal-bath-current" class="temp-val-live-value">--.- °C</strong>
+                            </div>
+                            <div class="temp-val-live-box">
+                                <span class="temp-val-live-label">External</span>
+                                <strong id="temp-cal-external-current" class="temp-val-live-value">--.- °C</strong>
+                            </div>
+                        </div>
+
+                        <div class="disso-hold-stage" id="temp-cal-hold-stage" style="display: none;" aria-live="polite">
+                            <div class="dt-temp-hold-ring" id="temp-cal-hold-ring">
+                                <div class="dt-temp-hold-ring-inner">
+                                    <p class="dt-temp-hold-label">Stabilizing</p>
+                                    <p class="dt-temp-hold-time" id="temp-cal-hold-time">03:00</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="temp-cal-measured-wrap" style="max-width: 360px; margin: 12px auto 0;">
+                            <label for="temp-cal-measured">Measured (Reference) °C</label>
+                            <input type="number" id="temp-cal-measured" class="input-field" min="15" max="55" step="0.1"
+                                inputmode="decimal" placeholder="Enter measured temp"
+                                onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                        </div>
+
+                        <div class="temp-cal-footer">
+                            <div class="temp-cal-status" id="temp-cal-status" aria-live="polite">Ready</div>
+                            <div class="temp-cal-actions">
+                                <button type="button" class="btn btn-primary" id="temp-cal-btn" onclick="onTemperatureCalibrationPrimary()">Start</button>
+                                <button type="button" class="btn btn-secondary" id="temp-cal-abort-btn" style="display:none;" onclick="abortTemperatureCalibrationHold()">Abort</button>
+                                <button type="button" class="btn btn-secondary" onclick="goToPage('validate')">Back</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-validation-run">
+                    <div class="add-member-container" style="max-width: 640px; margin: 0 auto;">
+                        <h2 class="section-title">Validation</h2>
+                        <p class="section-subtitle">This screen is unavailable for Dissolution Tester.</p>
+                        <div class="add-member-actions members-actions-row" style="margin-top: 16px;">
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calibration type select -->
+                <div class="page" id="page-calibration-type-select">
+                    <div class="validation-type-page">
+                        <h2 class="section-title">Select Calibration Type</h2>
+                        <p class="section-subtitle">Choose the calibration procedure to run</p>
+                        <div class="validation-type-grid calibration-grid">
+                            <label class="validation-type-settings-card cal-load">
+                                <input type="radio" name="cal-type" value="load" checked>
+                                <div class="settings-icon">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                    </svg>
+                                </div>
+                                <h3>Load Calibration</h3>
+                                <p>Calibrate load cell with known weight</p>
+                            </label>
+                            <label class="validation-type-settings-card cal-span">
+                                <input type="radio" name="cal-type" value="distance-zero">
+                                <div class="settings-icon">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                        <polyline points="12 5 19 12 12 19"></polyline>
+                                    </svg>
+                                </div>
+                                <h3>Distance Calibration</h3>
+                                <p>Calibrate distance zero (10 mm gauge block)</p>
+                            </label>
+                        </div>
+                        <button class="btn btn-primary validation-start-btn" onclick="startCalibrationFromType()">Start
+                            Calibration</button>
+                    </div>
+                </div>
+
+
+                <!-- Load Calibration (placeholder) -->
+                <div class="page" id="page-load-calibration">
+                    <div class="validation-test-page calibration-page">
+                        <h2 class="section-title">Load Calibration</h2>
+                        <div class="validation-test-layout">
+                            <div class="validation-instructions-card">
+                                <p>1. Set up load cell arrangement per manual.</p>
+                                <p>2. Place calibration plate on load cell.</p>
+                                <p>3. Perform tare process with empty plate.</p>
+                                <p>4. Place 5 kg calibration weight on the plate.</p>
+                                <p>5. Press Start Calibration to complete.</p>
+                            </div>
+                            <button type="button" class="btn btn-primary validation-action-btn"
+                                onclick="goToPage('calibration-type-select')">Back</button>
+                            <div class="validation-card">
+                                <div class="validation-card-label">Status</div>
+                                <span class="validation-card-value" id="load-calibration-status">Ready</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- Distance Calibration (placeholder) -->
+                <div class="page" id="page-distance-zero-calibration">
+                    <div class="validation-test-page calibration-page">
+                        <h2 class="section-title">Distance Calibration</h2>
+                        <div class="validation-test-layout">
+                            <div class="validation-instructions-card">
+                                <p>1. Press "Distance Zero"</p>
+                                <p>2. Wait for machine to zero and home</p>
+                                <p>3. Place 10 mm gauge block</p>
+                                <p>4. Press "Calibrate"</p>
+                            </div>
+                            <button type="button" class="btn btn-primary validation-action-btn"
+                                onclick="goToPage('calibration-type-select')">Back</button>
+                            <div class="validation-card">
+                                <div class="validation-card-label">Status</div>
+                                <span class="validation-card-value" id="distance-zero-calibration-status">Ready</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Settings (instrument configuration) -->
+                <div class="page" id="page-system-settings">
+                    <div class="system-settings-page">
+                        <section class="sys-set-section" aria-label="Beep">
+                            <h3 class="sys-set-section-title">Beep</h3>
+                            <div class="sys-set-cards" role="group" aria-label="Beep setting">
+                                <button type="button" class="sys-set-card is-selected" id="sys-beep-enable"
+                                    data-group="beep" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
+                                <button type="button" class="sys-set-card" id="sys-beep-disable"
+                                    data-group="beep" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
+                            </div>
+                            <input type="hidden" id="sys-beep" value="Enable">
+                        </section>
+
+                        <section class="sys-set-section" aria-label="Temperature tolerance">
+                            <h3 class="sys-set-section-title">Temperature Tolerance</h3>
+                            <div class="sys-set-cards" role="group" aria-label="Temperature tolerance setting">
+                                <button type="button" class="sys-set-card" id="sys-temp-tol-enable"
+                                    data-group="tempTolerance" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
+                                <button type="button" class="sys-set-card is-selected" id="sys-temp-tol-disable"
+                                    data-group="tempTolerance" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
+                            </div>
+                            <input type="hidden" id="sys-temp-tolerance" value="Disable">
+                            <div class="system-settings-tolerance-value-wrap" id="sys-temp-tolerance-value-wrap" hidden>
+                                <label for="sys-temp-tolerance-value">Tolerance (°C)</label>
+                                <input type="number" id="sys-temp-tolerance-value" class="input-field"
+                                    min="0.1" max="10" step="0.1" placeholder="e.g. 0.5"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </section>
+
+                        <div class="sys-set-footer">
+                            <button type="button" class="btn btn-primary" id="sys-settings-save-btn"
+                                onclick="saveSystemSettings()">Save</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-wakeup-schedule">
+                    <div class="wakeup-schedule-page">
+                        <div class="wakeup-panel">
+                            <div class="wakeup-enable-row" id="wakeup-enable-row">
+                                <div class="wakeup-enable-text">
+                                    <div class="wakeup-enable-title">Enable Schedule</div>
+                                    <div class="wakeup-enable-note">Auto heat at schedule time</div>
+                                </div>
+                                <div class="wakeup-toggle-group" role="group" aria-label="Schedule enabled">
+                                    <button type="button" id="wakeup-enable-off" class="wakeup-toggle-opt is-active"
+                                        aria-pressed="true" onclick="setWakeupScheduleEnabled(false)">OFF</button>
+                                    <button type="button" id="wakeup-enable-on" class="wakeup-toggle-opt"
+                                        aria-pressed="false" onclick="setWakeupScheduleEnabled(true)">ON</button>
+                                </div>
+                            </div>
+
+                            <div class="wakeup-fields">
+                                <div class="wakeup-field-card">
+                                    <label for="wakeup-time" class="wakeup-field-label">Wakeup Time</label>
+                                    <div class="wakeup-input-wrap">
+                                        <span class="wakeup-input-icon" aria-hidden="true">
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                                                stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <polyline points="12 6 12 12 16 14"></polyline>
+                                            </svg>
+                                        </span>
+                                        <input type="text" id="wakeup-time" class="input-field wakeup-input-with-icon"
+                                            placeholder="HH:MM" maxlength="5" inputmode="numeric"
+                                            onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                    </div>
+                                </div>
+                                <div class="wakeup-field-card">
+                                    <label for="wakeup-temp" class="wakeup-field-label">Target Temperature</label>
+                                    <div class="wakeup-input-wrap">
+                                        <span class="wakeup-input-icon" aria-hidden="true">
+                                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                                                stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+                                            </svg>
+                                        </span>
+                                        <input type="number" id="wakeup-temp" class="input-field wakeup-input-with-icon"
+                                            min="20" max="50" step="0.1" placeholder="°C"
+                                            onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <aside class="wakeup-days" aria-label="Select days">
+                                <div class="wakeup-days-heading">Days</div>
+                                <div class="wakeup-days-list" id="wakeup-days-list">
+                                    <button type="button" class="wakeup-day-btn" data-day="mon" onclick="toggleWakeupDay(this)">Mon</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="tue" onclick="toggleWakeupDay(this)">Tue</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="wed" onclick="toggleWakeupDay(this)">Wed</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="thu" onclick="toggleWakeupDay(this)">Thu</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="fri" onclick="toggleWakeupDay(this)">Fri</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="sat" onclick="toggleWakeupDay(this)">Sat</button>
+                                    <button type="button" class="wakeup-day-btn" data-day="sun" onclick="toggleWakeupDay(this)">Sun</button>
+                                </div>
+                            </aside>
+
+                            <div class="wakeup-actions">
+                                <button type="button" class="btn btn-primary" id="wakeup-save-btn"
+                                    onclick="saveWakeupSchedule()">Save</button>
+                                <button type="button" class="btn btn-secondary"
+                                    onclick="goToPage('settings')">Back</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div class="page" id="page-settings">
+                    <div class="settings-grid-container">
+                        <button class="settings-card settings-datetime" onclick="goToPage('datetime')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </div>
+                            <h3>Edit Date and Time</h3>
+                        </button>
+                        <button class="settings-card settings-recipes" onclick="manageRecipes()">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                </svg>
+                            </div>
+                            <h3>Manage Recipe</h3>
+                        </button>
+                        <button class="settings-card settings-system" onclick="goToPage('system-settings')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                    </path>
+                                </svg>
+                            </div>
+                            <h3>Test Settings</h3>
+                        </button>
+
+                        <button class="settings-card settings-wakeup" onclick="goToPage('wakeup-schedule')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                    <path d="M5 3L2 6"></path>
+                                    <path d="M19 3l3 3"></path>
+                                </svg>
+                            </div>
+                            <h3>Wakeup Schedule</h3>
+                        </button>
+                        <button type="button" class="settings-card settings-ip-config" onclick="goToPage('ip-config')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                                </svg>
+                            </div>
+                            <h3>IP Config</h3>
+                        </button>
+
+                        <button class="settings-card settings-disable" onclick="goToPage('disable-recipes')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="4" y="4" width="16" height="16" rx="3" ry="3"></rect>
+                                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                                </svg>
+                            </div>
+                            <h3>Disabled Recipes</h3>
+                        </button>
+                        <button class="settings-card settings-reset" onclick="showFactoryResetConfirm()">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="1 4 1 10 7 10"></polyline>
+                                    <polyline points="23 20 23 14 17 14"></polyline>
+                                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
+                                </svg>
+                            </div>
+                            <h3>Factory Reset</h3>
+                        </button>
+                        <button class="settings-card settings-factory" onclick="goToPage('factory-settings')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                    </path>
+                                </svg>
+                            </div>
+                            <h3>Factory Settings</h3>
+                        </button>
+                        <button class="settings-card settings-sysinfo" onclick="goToPage('system-info')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                                </svg>
+                            </div>
+                            <h3>System Info</h3>
+                        </button>
+                        <button class="settings-card settings-hw-init" onclick="openHardwareInitPage()">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <polyline points="1 20 1 14 7 14"></polyline>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                </svg>
+                            </div>
+                            <h3>Hardware Initialise</h3>
+                        </button>
+                        <button class="settings-card settings-cleaning" onclick="goToPage('cleaning-cycle')">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 2.7c-3.3 4.2-5 7-5 9.3a5 5 0 0 0 10 0c0-2.3-1.7-5.1-5-9.3z"></path>
+                                </svg>
+                            </div>
+                            <h3>Cleaning Cycle</h3>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- IP Config — LAN / WLAN (no sign-in) -->
+                <div class="page" id="page-ip-config">
+                    <div class="ip-config-page">
+                        <p class="ip-config-lead">Network addresses for this device on the local network.</p>
+                        <div id="ip-configure-list" class="ip-configure-list" aria-live="polite">
+                            <div class="ip-configure-loading">Loading addresses…</div>
+                        </div>
+                        <div class="ip-config-actions">
+                            <button type="button" class="btn btn-primary btn-refresh-ip-configure"
+                                onclick="refreshIpConfigureAddresses()">Refresh</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Legacy result page kept for redirects; unused in new flow -->
+                <div class="page" id="page-ip-config-result">
+                    <div class="page-content ip-config-result-page">
+                        <p class="ip-config-result-instructions">Use Refresh on IP Config to view addresses.</p>
+                        <div class="button-group" style="margin-top: 32px;">
+                            <button type="button" class="btn btn-secondary" onclick="goToPage('ip-config')">Back</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hardware Initialise wizard -->
+                <div class="page" id="page-hardware-init">
+                    <div class="hw-init-page">
+                        <div class="hw-init-status-band" id="hw-init-status-band" aria-live="polite">
+                            <div class="hw-init-phase" id="hw-init-phase">Preparing…</div>
+                            <div class="hw-init-detail" id="hw-init-detail">Waiting before sending initialise command</div>
+                        </div>
+                        <div class="hw-init-body">
+                            <div class="hw-init-viz" id="hw-init-viz" aria-hidden="true">
+                                <div class="hw-init-viz-lift is-active" id="hw-init-viz-lift">
+                                    <div class="hw-init-lift-column"></div>
+                                    <div class="hw-init-lift-label">Lifting column</div>
+                                </div>
+                                <div class="hw-init-viz-paddle" id="hw-init-viz-paddle">
+                                    <div class="dt-paddle-rotor hw-init-paddle-rotor" id="hw-init-paddle-rotor">
+                                        <svg class="dt-pdl-shaft" viewBox="0 0 48 48" width="64" height="64" aria-hidden="true">
+                                            <circle cx="24" cy="24" r="6" fill="currentColor" opacity="0.9"/>
+                                            <rect x="22" y="4" width="4" height="40" rx="1" fill="currentColor"/>
+                                            <path class="dt-pdl-blade" d="M8 22 h12 v4 H8 z M28 22 h12 v4 H28 z" fill="currentColor"/>
+                                        </svg>
+                                    </div>
+                                    <div class="hw-init-lift-label">Paddles</div>
+                                </div>
+                            </div>
+                            <ul class="hw-init-modules" id="hw-init-modules">
+                                <li class="hw-init-mod" data-mod="init" id="hw-init-mod-init">
+                                    <span class="hw-init-mod-name">Initialised</span>
+                                    <span class="hw-init-mod-state" id="hw-init-mod-init-state">Pending</span>
+                                </li>
+                                <li class="hw-init-mod" data-mod="m1" id="hw-init-mod-m1">
+                                    <span class="hw-init-mod-name">M1 · Lifting column</span>
+                                    <span class="hw-init-mod-state">Pending</span>
+                                </li>
+                                <li class="hw-init-mod" data-mod="m2" id="hw-init-mod-m2">
+                                    <span class="hw-init-mod-name">M2 · Paddles</span>
+                                    <span class="hw-init-mod-state">Pending</span>
+                                </li>
+                                <li class="hw-init-mod" data-mod="m3" id="hw-init-mod-m3">
+                                    <span class="hw-init-mod-name">M3 · Reserved</span>
+                                    <span class="hw-init-mod-state">Pending</span>
+                                </li>
+                                <li class="hw-init-mod" data-mod="m4" id="hw-init-mod-m4">
+                                    <span class="hw-init-mod-name">M4 · Reserved</span>
+                                    <span class="hw-init-mod-state">Pending</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="hw-init-success" id="hw-init-success" hidden>Initialisation Success</div>
+                        <div class="hw-init-actions">
+                            <button type="button" class="btn btn-secondary" id="hw-init-done-btn"
+                                onclick="goToPage('settings')" disabled>Done</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Info Page -->
+                <div class="page" id="page-system-info">
+                    <div class="sysinfo-page">
+                        <div class="sysinfo-header">
+                            <p class="sysinfo-lead">Live temperatures, machine state, and subsystem status</p>
+                            <div class="sysinfo-header-actions">
+                                <button type="button" class="btn btn-primary" onclick="loadSystemInfo()">Refresh</button>
+                            </div>
+                        </div>
+
+                        <div id="sysinfo-error" class="sysinfo-error" style="display: none;" role="alert"></div>
+
+                        <div class="sysinfo-grid">
+                            <!-- Thermal Diagnostics Panel -->
+                            <section class="sysinfo-card sysinfo-thermal-card" aria-label="Temperatures">
+                                <div class="sysinfo-card-header">
+                                    <h3 class="sysinfo-card-title">Temperatures</h3>
+                                </div>
+                                <div class="sysinfo-thermal-body">
+                                    <div class="sysinfo-hero-temp">
+                                        <div class="sysinfo-temp-badge bath">
+                                            <span class="sysinfo-temp-label">Bath</span>
+                                            <span class="sysinfo-bath-value" id="sysinfo-bath">—</span>
+                                        </div>
+                                        <div class="sysinfo-temp-badge ext">
+                                            <span class="sysinfo-temp-label">External</span>
+                                            <span class="sysinfo-ext-value" id="sysinfo-ext">—</span>
+                                        </div>
+                                    </div>
+                                    <div class="sysinfo-vessel-section">
+                                        <span class="sysinfo-sub-label">Vessels</span>
+                                        <div class="sysinfo-vessel-row" aria-label="Vessel temperatures">
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 1</span><span class="sysinfo-vessel-val" id="sysinfo-v1">—</span></div>
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 2</span><span class="sysinfo-vessel-val" id="sysinfo-v2">—</span></div>
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 3</span><span class="sysinfo-vessel-val" id="sysinfo-v3">—</span></div>
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 4</span><span class="sysinfo-vessel-val" id="sysinfo-v4">—</span></div>
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 5</span><span class="sysinfo-vessel-val" id="sysinfo-v5">—</span></div>
+                                            <div class="sysinfo-vessel-card"><span class="sysinfo-vessel-label">VSL 6</span><span class="sysinfo-vessel-val" id="sysinfo-v6">—</span></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <div class="sysinfo-right-col">
+                                <section class="sysinfo-card sysinfo-state-card" aria-label="Machine state">
+                                    <div class="sysinfo-card-header">
+                                        <h3 class="sysinfo-card-title">Machine State</h3>
+                                    </div>
+                                    <div class="sysinfo-state-line" id="sysinfo-machine-state">—</div>
+                                </section>
+
+                                <section class="sysinfo-card sysinfo-subsystem-card" aria-label="Subsystem status">
+                                    <div class="sysinfo-card-header">
+                                        <h3 class="sysinfo-card-title">Subsystems</h3>
+                                    </div>
+                                    <div class="sysinfo-subsystem-grid">
+                                        <div class="sysinfo-subsystem-item">
+                                            <span class="sysinfo-subsystem-key">Float Switch</span>
+                                            <span class="sysinfo-subsystem-val" id="sysinfo-float-switch">—</span>
+                                        </div>
+                                        <div class="sysinfo-subsystem-item">
+                                            <span class="sysinfo-subsystem-key">Heater Sensor</span>
+                                            <span class="sysinfo-subsystem-val" id="sysinfo-heater-sensor">—</span>
+                                        </div>
+                                        <div class="sysinfo-subsystem-item">
+                                            <span class="sysinfo-subsystem-key">Pump</span>
+                                            <span class="sysinfo-subsystem-val" id="sysinfo-pump">—</span>
+                                        </div>
+                                        <div class="sysinfo-subsystem-item">
+                                            <span class="sysinfo-subsystem-key">Sample Collector</span>
+                                            <span class="sysinfo-subsystem-val" id="sysinfo-sample-collector">—</span>
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cleaning Cycle Page -->
+                <div class="page" id="page-cleaning-cycle">
+                    <div class="cleaning-page">
+                        <div class="cleaning-hero">
+                            <p class="cleaning-lead">Set volume and cycles, then start. Tap the primary button again to stop.</p>
+                        </div>
+                        <div class="cleaning-fields">
+                            <div class="cleaning-field-card form-group">
+                                <label for="cleaning-sample-volume">Cleaning Sample Volume (mL)</label>
+                                <input type="number" id="cleaning-sample-volume" class="input-field"
+                                    min="0.1" max="1000" step="0.1" placeholder="e.g. 10"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="cleaning-field-card form-group">
+                                <label for="cleaning-cycle-count">No of Cycles</label>
+                                <input type="number" id="cleaning-cycle-count" class="input-field"
+                                    min="1" max="99" step="1" placeholder="e.g. 3"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <div class="cleaning-status-banner" id="cleaning-status-banner" aria-live="polite">
+                            <span id="cleaning-status-text">Enter volume and cycles, then start.</span>
+                        </div>
+
+                        <div class="cleaning-controls">
+                            <button type="button" class="btn btn-primary cleaning-primary-btn" id="cleaning-start-btn"
+                                onclick="cleaningCyclePrimaryAction()">Start Cleaning</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- User Profile Page -->
+                <div class="page" id="page-user-profile">
+                    <div class="profile-dashboard-container">
+                        <div class="profile-dashboard-left">
+                            <div class="current-user-header">
+                                <div class="user-avatar-large">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                </div>
+                                <div class="user-info-text">
+                                    <h2 id="profile-name-display">Factory</h2>
+                                    <span id="profile-role-display" class="role-badge">Factory</span>
+                                </div>
+                            </div>
+                            <div class="profile-edit-form">
+                                <div class="form-group full-width">
+                                    <label>Edit Full Name</label>
+                                    <input type="text" id="profile-fullname" class="input-field"
+                                        placeholder="Full name">
+                                </div>
+                                <div class="form-group full-width">
+                                    <label>Edit Password</label>
+                                    <input type="password" id="profile-password" class="input-field"
+                                        placeholder="Enter new password">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-actions">
+                            <button class="btn btn-blue btn-block" onclick="saveUserProfile()">Save</button>
+                            <button class="btn btn-orange btn-block" onclick="goToPage('manage-members')">Manage Profiles</button>
+                            <button class="btn btn-blue btn-block" onclick="openAddMember()">Add Members</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manage Profiles Page -->
+                <div class="page" id="page-manage-members">
+                    <div class="manage-members-container">
+                        <div class="member-status-switch">
+                            <button class="btn member-status-btn member-status-btn-locked" onclick="goToPage('locked-members')">
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <rect x="4" y="11" width="16" height="9" rx="2"></rect>
+                                        <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
+                                    </svg>
+                                    <span>Locked Accounts</span>
+                                </span>
+                            </button>
+                            <button class="btn member-status-btn member-status-btn-disabled" onclick="goToPage('disabled-members')">
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <circle cx="12" cy="12" r="9"></circle>
+                                        <path d="M8.5 8.5l7 7"></path>
+                                    </svg>
+                                    <span>Disabled Accounts</span>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="manage-members-list-scroll">
+                            <div id="members-empty-state" class="empty-state-message">No members added yet.</div>
+                            <table class="member-table">
+                                <thead>
+                                    <tr>
+                                        <th>Full Name</th>
+                                        <th>Username</th>
+                                        <th>Role</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="members-list-body">
+                                    <!-- Populated by renderMemberList() -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <!-- Change Role Modal Overlay -->
+                    <div id="role-modal-overlay" class="modal-overlay" style="display: none;">
+                        <div class="role-modal">
+                            <h3 id="role-modal-title">Change Role</h3>
+                            <p id="role-modal-current">Current Role: User</p>
+                            <div class="role-modal-buttons">
+                                <button class="btn-role-select btn-role-admin" onclick="confirmRoleChange('Admin')">Admin</button>
+                                <button class="btn-role-select btn-role-supervisor" onclick="confirmRoleChange('Supervisor')">Reviewer</button>
+                                <button class="btn-role-select btn-role-qa" onclick="confirmRoleChange('QA')">QA</button>
+                                <button class="btn-role-select btn-role-user" onclick="confirmRoleChange('User')">User</button>
+                                <button class="btn-role-select btn-role-cancel" onclick="closeRoleModal()">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Locked Members Page -->
+                <div class="page" id="page-locked-members">
+                    <div class="manage-members-container">
+                        <div class="member-status-switch">
+                            <button class="btn member-status-btn member-status-btn-active" onclick="goToPage('manage-members')">Active Accounts</button>
+                            <button class="btn member-status-btn member-status-btn-locked member-status-btn-current" disabled>
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <rect x="4" y="11" width="16" height="9" rx="2"></rect>
+                                        <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
+                                    </svg>
+                                    <span>Locked Accounts</span>
+                                </span>
+                            </button>
+                            <button class="btn member-status-btn member-status-btn-disabled" onclick="goToPage('disabled-members')">
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <circle cx="12" cy="12" r="9"></circle>
+                                        <path d="M8.5 8.5l7 7"></path>
+                                    </svg>
+                                    <span>Disabled Accounts</span>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="manage-members-list-scroll">
+                            <div id="locked-members-empty-state" class="empty-state-message">No locked accounts.</div>
+                            <table class="member-table">
+                                <thead>
+                                    <tr>
+                                        <th>Full Name</th>
+                                        <th>Username</th>
+                                        <th>Role</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="locked-members-table-body">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Disabled Members Page -->
+                <div class="page" id="page-disabled-members">
+                    <div class="manage-members-container">
+                        <div class="member-status-switch">
+                            <button class="btn member-status-btn member-status-btn-active" onclick="goToPage('manage-members')">Active Accounts</button>
+                            <button class="btn member-status-btn member-status-btn-locked" onclick="goToPage('locked-members')">
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <rect x="4" y="11" width="16" height="9" rx="2"></rect>
+                                        <path d="M8 11V8a4 4 0 0 1 8 0v3"></path>
+                                    </svg>
+                                    <span>Locked Accounts</span>
+                                </span>
+                            </button>
+                            <button class="btn member-status-btn member-status-btn-disabled member-status-btn-current" disabled>
+                                <span class="member-status-label-with-icon">
+                                    <svg class="member-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                        <circle cx="12" cy="12" r="9"></circle>
+                                        <path d="M8.5 8.5l7 7"></path>
+                                    </svg>
+                                    <span>Disabled Accounts</span>
+                                </span>
+                            </button>
+                        </div>
+                        <div class="manage-members-list-scroll">
+                            <div id="disabled-members-empty-state" class="empty-state-message">No disabled accounts.</div>
+                            <table class="member-table">
+                                <thead>
+                                    <tr>
+                                        <th>Full Name</th>
+                                        <th>Username</th>
+                                        <th>Role</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="disabled-members-table-body">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Member Page -->
+                <div class="page" id="page-add-member">
+                    <div class="add-member-container">
+                        <h2 class="section-title" id="add-member-page-title">Add New Member</h2>
+                        <div class="add-member-form form-grid">
+                            <div class="form-group">
+                                <label>Full Name</label>
+                                <input type="text" id="add-fullname" class="input-field add-member-input" placeholder="Enter full name"
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>User ID / Employee ID</label>
+                                <input type="text" id="add-userid" class="input-field add-member-input"
+                                    placeholder="Enter User ID / Employee ID"
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label id="add-password-label">Password</label>
+                                <input type="password" id="add-password" class="input-field add-member-input"
+                                    placeholder="Enter password"
+                                    autocomplete="new-password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label id="add-confirm-password-label">Confirm Password</label>
+                                <input type="password" id="add-confirm-password" class="input-field add-member-input"
+                                    placeholder="Confirm password"
+                                    autocomplete="new-password"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                        </div>
+
+                        <div class="role-selection-container">
+                            <label>Role</label>
+                            <div class="role-options">
+                                <button type="button" class="role-btn active" data-role="User" onclick="selectRole('User')">User</button>
+                                <button type="button" class="role-btn" data-role="Supervisor" onclick="selectRole('Supervisor')">Reviewer</button>
+                                <button type="button" class="role-btn" data-role="QA" onclick="selectRole('QA')">QA</button>
+                                <button type="button" class="role-btn" data-role="Admin" onclick="selectRole('Admin')">Admin</button>
+                            </div>
+                            <input type="hidden" id="selected-role" value="User">
+                        </div>
+
+                        <div id="add-member-permissions-panel" class="permissions-panel is-hidden">
+                            <div class="permissions-panel-header">
+                                <label>User functionalities</label>
+                                <span class="permissions-panel-subtitle">Select the permissions for this member.</span>
+                            </div>
+                            <div id="permission-cards-grid" class="permission-cards-grid"></div>
+                        </div>
+
+                        <div class="add-member-actions members-actions-row">
+                            <button type="button" class="btn btn-primary" id="add-member-save-btn" onclick="saveMemberForm()">Save Profile</button>
+                            <button type="button" class="btn btn-secondary" onclick="cancelAddMemberEdit()">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="page-member-biometric">
+                    <div class="add-member-container">
+                        <h2 class="section-title">Register Fingerprint</h2>
+                        <div class="member-biometric-summary">
+                            <div class="member-biometric-summary-row">
+                                <span class="member-biometric-label">Full Name</span>
+                                <strong id="member-biometric-name">--</strong>
+                            </div>
+                            <div class="member-biometric-summary-row">
+                                <span class="member-biometric-label">User ID</span>
+                                <strong id="member-biometric-username">--</strong>
+                            </div>
+                            <div class="member-biometric-summary-row">
+                                <span class="member-biometric-label">Role</span>
+                                <strong id="member-biometric-role">--</strong>
+                            </div>
+                        </div>
+                        <div class="member-biometric-instructions">
+                            Register this user's fingerprint using two scans of the same finger: place finger once, remove it, then place the same finger again.
+                        </div>
+                        <button type="button" id="member-biometric-enroll-btn" class="login-biometric-btn" onclick="enrollMemberBiometric()">
+                            <div class="biometric-icon">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18.9 7a8 8 0 0 0-5.3-3.8A8 8 0 0 0 4 12"></path>
+                                    <path d="M12 20a8 8 0 0 0 8-8 4.5 4.5 0 0 0-1-2.8"></path>
+                                    <path d="M9.1 4.6A8 8 0 0 0 4.5 9.4"></path>
+                                    <path d="M12 12a4 4 0 0 0-4 4"></path>
+                                    <path d="M16 12a4 4 0 0 1-4 4"></path>
+                                    <path d="M12 16v4"></path>
+                                    <path d="M12 8a4 4 0 0 1 4 4"></path>
+                                    <path d="M8 12a4 4 0 0 1 4-4"></path>
+                                </svg>
+                            </div>
+                            <span>Register Fingerprint</span>
+                        </button>
+                        <div class="add-member-actions members-actions-row">
+                            <button class="btn btn-secondary" onclick="skipMemberBiometricEnrollment()">Skip for Now</button>
+                            <button class="btn btn-secondary" onclick="backToMemberAfterBiometric()">Back to Members</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Date & Time -->
+                <div class="page" id="page-datetime">
+                    <div class="datetime-setup-container">
+                        <div class="datetime-grid">
+                            <div class="datetime-card">
+                                <div class="datetime-label">Date</div>
+                                <div class="datetime-date-row">
+                                    <input type="text" id="edit-date" class="datetime-display-box"
+                                        placeholder="DD-MM-YYYY">
+                                    <button type="button" class="date-picker-icon-btn datetime-picker-btn"
+                                        onclick="openDatePickerForEditDate()" title="Open calendar"
+                                        aria-label="Open calendar">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <input type="date" id="edit-date-picker-hidden"
+                                    style="position:absolute;visibility:hidden;width:1px;height:1px;left:0;top:0;clip:rect(0,0,0,0);"
+                                    tabindex="-1">
+                            </div>
+                            <div class="datetime-card">
+                                <div class="datetime-label">Time</div>
+                                <input type="text" id="edit-time" class="datetime-display-box" placeholder="HH:MM (24h)">
+                            </div>
+                        </div>
+                        <button class="btn-apply-datetime" onclick="applyDateTime()">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                            Apply Date & Time
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Factory Settings -->
+                <div class="page" id="page-factory-settings">
+                    <div class="factory-settings-inner">
+                        <h2 class="section-title">Factory Settings</h2>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Company Name <span class="required">*</span></label>
+                                <input type="text" id="factory-company-name" class="input-field"
+                                    placeholder="Enter company name"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Company Location <span class="required">*</span></label>
+                                <input type="text" id="factory-company-location" class="input-field"
+                                    placeholder="City / Site"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Serial Number</label>
+                                <input type="text" id="factory-serial-no" class="input-field"
+                                    placeholder="Unique device serial"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Model Number</label>
+                                <input type="text" id="factory-model-no" class="input-field"
+                                    placeholder="Product model"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Instrument ID</label>
+                                <input type="text" id="factory-instrument-id" class="input-field"
+                                    placeholder="Internal unique ID"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Installation Date</label>
+                                <div class="date-input-wrapper">
+                                    <input type="date" id="factory-installation-date" class="input-field">
+                                    <button type="button" class="date-picker-icon-btn" onclick="openDatePicker('factory-installation-date')" title="Open calendar" aria-label="Open calendar">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Firmware Version</label>
+                                <input type="text" id="factory-firmware" class="input-field" value="RD-TDT v1.0.0" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label>Installed By</label>
+                                <input type="text" id="factory-installed-by" class="input-field"
+                                    placeholder="Technician name"
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Recipes</label>
+                                <input type="number" id="factory-max-recipes" class="input-field" min="1" max="999" placeholder="150" value="150">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Users</label>
+                                <input type="number" id="factory-max-users" class="input-field" min="1" max="999" placeholder="10" value="10">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Admins</label>
+                                <input type="number" id="factory-max-admins" class="input-field" min="1" max="99" placeholder="2" value="2">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Reviewers</label>
+                                <input type="number" id="factory-max-supervisors" class="input-field" min="1" max="99" placeholder="3" value="3">
+                            </div>
+                            <div class="form-group">
+                                <label>Max QA</label>
+                                <input type="number" id="factory-max-qa" class="input-field" min="1" max="99" placeholder="3" value="3">
+                            </div>
+                            <div class="form-group">
+                                <label>Password Reset Period (Days)</label>
+                                <input type="number" id="factory-password-reset-days" class="input-field" min="0" max="3650" placeholder="30" value="30"
+                                    title="Days between password resets. 0 = disabled.">
+                            </div>
+                            <div class="form-group">
+                                <label>Biometric Login</label>
+                                <select id="factory-biometric-enabled" class="input-field">
+                                    <option value="enabled">Enabled</option>
+                                    <option value="disabled">Disabled</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Auto logout after idle (minutes)</label>
+                                <input type="number" id="factory-auto-logout-minutes" class="input-field" min="0" max="10080" placeholder="0"
+                                    value="0"
+                                    title="0 = disabled. While a test or validation run is active, logout is never forced."
+                                    onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                <p class="section-subtitle" style="margin-top:6px;font-size:13px;">0 disables auto logout. When set, users are logged out after this many minutes with no screen activity. No auto logout during an active test run or validation run.</p>
+                            </div>
+                        </div>
+                        <div class="validation-actions-row">
+                            <button type="button" class="btn btn-secondary"
+                                onclick="goToPage('settings')">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="saveFactorySettings()">Save</button>
+                        </div>  
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <div id="keyboard-root"></div>
+    <script src="keyboard.js?v=3"></script>
+    <script src="input-focus.js?v=1"></script>
+    <script src="rbac.js?v=6"></script>
+    <script src="disso_client.js?v=1"></script>
+    <script src="script.js?v=87"></script>
+    <script src="validation_suite.js?v=1"></script>
+</body>
+
+</html>

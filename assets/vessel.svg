@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 220" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="vg-body" x1="28" y1="40" x2="132" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c5ccd6"/>
+      <stop offset="18%" stop-color="#f4f6f8"/>
+      <stop offset="50%" stop-color="#e8ecf1"/>
+      <stop offset="82%" stop-color="#f4f6f8"/>
+      <stop offset="100%" stop-color="#c5ccd6"/>
+    </linearGradient>
+    <linearGradient id="vg-liquid" x1="80" y1="95" x2="80" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f1f4f7"/>
+      <stop offset="55%" stop-color="#d9dee6"/>
+      <stop offset="100%" stop-color="#c4cad4"/>
+    </linearGradient>
+    <linearGradient id="vg-rim" x1="20" y1="22" x2="140" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a8b2bf"/>
+      <stop offset="40%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#8b96a5"/>
+    </linearGradient>
+    <linearGradient id="vg-inner" x1="36" y1="48" x2="124" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#dfe4ea"/>
+      <stop offset="50%" stop-color="#f7f9fb"/>
+      <stop offset="100%" stop-color="#dfe4ea"/>
+    </linearGradient>
+  </defs>
+
+  <!-- outer body: cylindrical + U bottom -->
+  <path d="M36 48
+           V155
+           C36 188 54 204 80 204
+           C106 204 124 188 124 155
+           V48 Z"
+        fill="url(#vg-body)"
+        stroke="#3f4b5a"
+        stroke-width="3.5"
+        stroke-linejoin="round"/>
+
+  <!-- inner wall (glass thickness) -->
+  <path d="M42 52
+           V153
+           C42 182 58 196 80 196
+           C102 196 118 182 118 153
+           V52 Z"
+        fill="url(#vg-inner)"
+        stroke="#64748b"
+        stroke-width="1.4"
+        opacity="0.85"/>
+
+  <!-- liquid ~2/3 -->
+  <path d="M44 98
+           V153
+           C44 180 59 193 80 193
+           C101 193 116 180 116 153
+           V98 Z"
+        fill="url(#vg-liquid)"/>
+
+  <!-- liquid surface ellipse -->
+  <ellipse cx="80" cy="98" rx="36" ry="9"
+           fill="#eef2f6"
+           stroke="#6b7787"
+           stroke-width="2"/>
+  <ellipse cx="80" cy="95.5" rx="22" ry="3.8"
+           fill="#ffffff"
+           opacity="0.55"/>
+
+  <!-- flared rim -->
+  <ellipse cx="80" cy="40" rx="52" ry="13"
+           fill="url(#vg-rim)"
+           stroke="#3f4b5a"
+           stroke-width="3.5"/>
+  <ellipse cx="80" cy="36" rx="40" ry="8"
+           fill="#f8fafc"
+           opacity="0.7"/>
+  <ellipse cx="80" cy="34" rx="28" ry="4.5"
+           fill="#ffffff"
+           opacity="0.35"/>
+
+  <!-- neck band under rim -->
+  <path d="M42 48 H118"
+        stroke="#64748b"
+        stroke-width="1.6"
+        opacity="0.45"/>
+
+  <!-- side highlights -->
+  <path d="M48 58 V148"
+        stroke="#ffffff"
+        stroke-width="4"
+        stroke-linecap="round"
+        opacity="0.55"/>
+  <path d="M112 58 V148"
+        stroke="#94a3b8"
+        stroke-width="2.6"
+        stroke-linecap="round"
+        opacity="0.4"/>
+</svg>

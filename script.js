@@ -207,6 +207,54 @@ var FACTORY_USERNAME = 'RLERLT';
 var currentMemberIdForRoleEdit = null;
 var appModalResolve = null;
 /** USP friability validation (single procedure). */
+/** Dissolution stirrer / paddle RPM setpoint limits (Quick Test, recipes, RPM validation). */
+var DISSOLUTION_RPM_MIN = 20;
+var DISSOLUTION_RPM_MAX = 300;
+
+function getDissolutionRpmMin() { return DISSOLUTION_RPM_MIN; }
+function getDissolutionRpmMax() { return DISSOLUTION_RPM_MAX; }
+
+function dissolutionRpmRangeMessage(prefix) {
+    var range = DISSOLUTION_RPM_MIN + '–' + DISSOLUTION_RPM_MAX;
+    if (prefix) return String(prefix) + ' RPM must be between ' + range + '.';
+    return 'RPM must be between ' + range + '.';
+}
+
+function isDissolutionRpmInRange(rpm) {
+    var n = typeof rpm === 'number' ? rpm : parseFloat(rpm);
+    return !isNaN(n) && n >= DISSOLUTION_RPM_MIN && n <= DISSOLUTION_RPM_MAX;
+}
+
+/** Block out-of-range RPM entry: clear field and optionally show a modal. Returns true if empty or in range. */
+function enforceDissolutionRpmInput(el, opts) {
+    opts = opts || {};
+    if (!el) return true;
+    var raw = String(el.value == null ? '' : el.value).trim();
+    if (raw === '') return true;
+    var n = parseFloat(raw);
+    if (isNaN(n) || n < DISSOLUTION_RPM_MIN || n > DISSOLUTION_RPM_MAX) {
+        el.value = '';
+        if (opts.showModal !== false && typeof showAppModal === 'function') {
+            showAppModal(dissolutionRpmRangeMessage(opts.prefix || ''), opts.title || 'RPM');
+        }
+        return false;
+    }
+    if (opts.asInt) el.value = String(Math.round(n));
+    return true;
+}
+
+function bindDissolutionRpmInput(el, opts) {
+    if (!el || el._dissolutionRpmBound) return;
+    el._dissolutionRpmBound = true;
+    el.min = String(DISSOLUTION_RPM_MIN);
+    el.max = String(DISSOLUTION_RPM_MAX);
+    el.setAttribute('min', String(DISSOLUTION_RPM_MIN));
+    el.setAttribute('max', String(DISSOLUTION_RPM_MAX));
+    var check = function () { enforceDissolutionRpmInput(el, opts); };
+    el.addEventListener('change', check);
+    el.addEventListener('blur', check);
+}
+
 var VALIDATION_USP_RPM = 25;
 var VALIDATION_USP_TIME_MIN = 4;
 var VALIDATION_USP_ROTATION_TARGET = 100;
@@ -2522,7 +2570,9 @@ function goToPage(pageName) {
         pageName === 'sample-volume-validation' || pageName === 'sample-volume-validation-result' ||
         pageName === 'validation-suite-review') {
         navActivePage = 'validate';
-    } else if (pageName === 'test-run' || pageName === 'vessel-temperature') {
+    } else if (pageName === 'vessel-temperature') {
+        navActivePage = (_vesselTempReturnPage === 'system-info') ? 'settings' : 'manage-recipes';
+    } else if (pageName === 'test-run') {
         navActivePage = 'manage-recipes';
     } else if (pageName === 'report-preview' || pageName === 'view-recipes' || pageName === 'recipe-print-preview') {
         navActivePage = 'reports';
@@ -2786,7 +2836,7 @@ function goBack() {
     } else if (pageId === 'page-wakeup-schedule') {
         goToPage('settings');
     } else if (pageId === 'page-vessel-temperature') {
-        goToPage('test-run');
+        closeVesselTemperaturePage();
     } else if (pageId === 'page-test-run') {
         if (typeof dissolutionTestBack === 'function') dissolutionTestBack();
         else goToPage('manage-recipes');
@@ -3819,9 +3869,11 @@ function renderDissolutionStepRows(n, listId, prefillSteps) {
             : '';
         row.innerHTML =
             '<span class="dissolution-step-label">Step ' + i + '</span>' +
-            '<input type="number" class="input-field dissolution-step-rpm" min="1" step="1" placeholder="RPM" ' +
+            '<input type="number" class="input-field dissolution-step-rpm" min="' + DISSOLUTION_RPM_MIN + '" max="' + DISSOLUTION_RPM_MAX + '" step="1" placeholder="RPM" ' +
             'value="' + rpmVal + '" ' +
-            'onfocus="if(typeof openOSKForInput === \'function\') openOSKForInput(this)">' +
+            'onfocus="if(typeof openOSKForInput === \'function\') openOSKForInput(this)" ' +
+            'onchange="if(typeof enforceDissolutionRpmInput === \'function\') enforceDissolutionRpmInput(this, { title: \'RPM\', asInt: true })" ' +
+            'onblur="if(typeof enforceDissolutionRpmInput === \'function\') enforceDissolutionRpmInput(this, { title: \'RPM\', asInt: true })">' +
             '<input type="text" class="input-field dissolution-step-duration" inputmode="numeric" placeholder="HH:MM:SS" ' +
             'value="' + durVal + '" ' +
             'onfocus="if(typeof openOSKForInput === \'function\') openOSKForInput(this)">' +
@@ -3854,6 +3906,9 @@ function collectDissolutionStepsFromDom(opts) {
         var sampleVolume = sampleEl ? String(sampleEl.value || '').trim() : '';
         if (isNaN(rpm) || rpm <= 0) {
             return { error: 'Please enter a valid RPM for Step ' + stepNum + '.', steps: [] };
+        }
+        if (!isDissolutionRpmInRange(rpm)) {
+            return { error: dissolutionRpmRangeMessage('Step ' + stepNum + ':'), steps: [] };
         }
         if (isNaN(durationSeconds) || durationSeconds < 1) {
             return { error: 'Please enter duration as HH:MM:SS for Step ' + stepNum + '.', steps: [] };
@@ -4191,6 +4246,7 @@ function initRpmValidationPage() {
     if (targetEl) {
         targetEl.value = '';
         targetEl.disabled = false;
+        bindDissolutionRpmInput(targetEl, { title: 'RPM Validation', asInt: true });
     }
     var tachEl = document.getElementById('rpm-val-tachometer');
     if (tachEl) tachEl.value = '';
@@ -4236,9 +4292,16 @@ function confirmPhysicalParameters() {
 
 function startRpmValidationMotor() {
     var targetEl = document.getElementById('rpm-val-target');
+    if (targetEl && !enforceDissolutionRpmInput(targetEl, { title: 'RPM Validation', asInt: true })) {
+        return;
+    }
     var target = targetEl ? parseInt(targetEl.value, 10) : NaN;
     if (isNaN(target) || target <= 0) {
         showAppModal('Please enter a valid target RPM before starting the motor.', 'RPM Validation');
+        return;
+    }
+    if (!isDissolutionRpmInRange(target)) {
+        showAppModal(dissolutionRpmRangeMessage('Target'), 'RPM Validation');
         return;
     }
     if (typeof apiRequest !== 'function') {
@@ -4487,9 +4550,16 @@ function onRpmValidationPrimary() {
         return;
     }
     var targetEl = document.getElementById('rpm-val-target');
+    if (targetEl && !enforceDissolutionRpmInput(targetEl, { title: 'RPM Validation', asInt: true })) {
+        return;
+    }
     var target = targetEl ? parseInt(targetEl.value, 10) : NaN;
     if (isNaN(target) || target <= 0) {
         showAppModal('Please enter a valid target RPM before starting.', 'RPM Validation');
+        return;
+    }
+    if (!isDissolutionRpmInRange(target)) {
+        showAppModal(dissolutionRpmRangeMessage('Target'), 'RPM Validation');
         return;
     }
     _rpmValMeasuredReady = false;
@@ -4552,6 +4622,9 @@ function onRpmValidationNext() {
 function runRpmValidation() {
     var targetEl = document.getElementById('rpm-val-target');
     var tachEl = document.getElementById('rpm-val-tachometer');
+    if (targetEl && !enforceDissolutionRpmInput(targetEl, { title: 'RPM Validation', asInt: true })) {
+        return;
+    }
     var target = targetEl ? parseFloat(targetEl.value) : NaN;
     var tachometer = tachEl ? parseFloat(tachEl.value) : NaN;
     if (isNaN(target) || target <= 0) {
@@ -11100,8 +11173,7 @@ function setSysinfoStatus(id, val) {
 
 function setSystemInfoLoading() {
     setSysinfoBath('…');
-    ['sysinfo-ext', 'sysinfo-v1', 'sysinfo-v2', 'sysinfo-v3', 'sysinfo-v4', 'sysinfo-v5', 'sysinfo-v6',
-     'sysinfo-machine-state', 'sysinfo-float-switch', 'sysinfo-heater-sensor', 'sysinfo-pump',
+    ['sysinfo-ext', 'sysinfo-machine-state', 'sysinfo-float-switch', 'sysinfo-heater-sensor', 'sysinfo-pump',
      'sysinfo-sample-collector'].forEach(function (id) {
         setSysinfoStatus(id, '…');
     });
@@ -11119,10 +11191,6 @@ function applySystemInfoData(data) {
     if (bath == null && temps.bath != null) bath = temps.bath;
     setSysinfoBath(bath);
     setSysinfoStatus('sysinfo-ext', _sysinfoTempText(temps.external != null ? temps.external : temps.ext));
-    var vessels = temps.vessels || data.vessels || [];
-    for (var i = 0; i < 6; i++) {
-        setSysinfoStatus('sysinfo-v' + (i + 1), _sysinfoTempText(vessels[i]));
-    }
     var stateText = data.machineState || data.runStatus || '—';
     if (data.stepCurrent != null && data.stepTotal != null) {
         stateText = String(stateText) + '  ·  Step ' + data.stepCurrent + '/' + data.stepTotal;
@@ -12708,7 +12776,15 @@ function cleanupDissolutionTestOnLeave() {
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
 }
 
-function openVesselTemperaturePage() {
+var _vesselTempReturnPage = 'test-run';
+
+function openVesselTemperaturePage(returnPage) {
+    var from = String(returnPage || '').trim();
+    if (!from) {
+        var active = typeof getActivePageName === 'function' ? getActivePageName() : '';
+        from = (active === 'system-info') ? 'system-info' : 'test-run';
+    }
+    _vesselTempReturnPage = (from === 'system-info') ? 'system-info' : 'test-run';
     if (typeof renderVesselTemperaturePage === 'function') renderVesselTemperaturePage();
     goToPage('vessel-temperature');
     // One-shot poll only when Info is opened (no continuous polling)
@@ -12721,7 +12797,9 @@ function openVesselTemperaturePage() {
     }
 }
 
-function closeVesselTemperaturePage() { goToPage('test-run'); }
+function closeVesselTemperaturePage() {
+    goToPage(_vesselTempReturnPage || 'test-run');
+}
 
 function renderVesselTemperaturePage(live) {
     var setpoint = (_dissolutionTest && _dissolutionTest.recipe && _dissolutionTest.recipe.temperature) ? parseFloat(_dissolutionTest.recipe.temperature) : 37.0;

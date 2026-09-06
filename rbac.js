@@ -393,5 +393,9 @@ function checkNavigationAccess(screenId) {
     var mode = (typeof window !== 'undefined' && window.recipeListMode) ? window.recipeListMode : 'manage';
     featureKey = mode === 'load' ? 'recipe-test' : 'recipe-manage';
   }
+  if (screenId === 'vessel-temperature') {
+    var u = window.currentUser || role;
+    return canAccess(u, 'recipe-test') || canAccess(u, 'settings');
+  }
   return canAccess(window.currentUser || role, featureKey);
 }

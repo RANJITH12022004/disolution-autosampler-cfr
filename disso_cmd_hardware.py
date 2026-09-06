@@ -579,8 +579,21 @@ def beep(count: int = 1) -> Dict[str, Any]:
     return _tx(frame, expect_prefix=expect)
 
 
+DISSOLUTION_RPM_MIN = 20
+DISSOLUTION_RPM_MAX = 300
+
+
 def start_pld(rpm: int) -> Dict[str, Any]:
-    return _tx(proto.build_start_pld(rpm), expect_prefix="START-PLD")
+    try:
+        r = int(rpm)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "rpm must be an integer"}
+    if r < DISSOLUTION_RPM_MIN or r > DISSOLUTION_RPM_MAX:
+        return {
+            "ok": False,
+            "error": f"rpm must be between {DISSOLUTION_RPM_MIN} and {DISSOLUTION_RPM_MAX}",
+        }
+    return _tx(proto.build_start_pld(r), expect_prefix="START-PLD")
 
 
 def stop_pld(rpm: int = 0) -> Dict[str, Any]:

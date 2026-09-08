@@ -4,6 +4,8 @@
 
   var _pollTimer = null;
   var _sse = null;
+  var _tempPollTimer = null;
+  var _autoTempArmed = false;
 
   function api(path, opts) {
     opts = opts || {};
@@ -111,7 +113,7 @@
       }
     }).then(function (res) {
       if (!res.ok || !(res.body && res.body.ok)) {
-        throw new Error((res.body && res.body.error) || 'Failed to load recipe to ESP');
+        throw new Error((res.body && res.body.error) || 'Recipe prepare failed');
       }
       return res.body;
     });
@@ -201,22 +203,35 @@
       }
     }
     var temps = st.temps || {};
-    if (temps.bath != null) {
-      var bathEl = document.getElementById('dt-bath-temp') || document.getElementById('vt-bath');
-      if (bathEl) bathEl.textContent = Number(temps.bath).toFixed(1) + ' \u00B0C';
-    }
-    var vessels = temps.vessels || [];
-    for (var i = 0; i < 6; i++) {
-      var vEl = document.getElementById('vt-vessel-' + (i + 1));
-      if (vEl && vessels[i] != null && vEl.querySelector && vEl.querySelector('.vt-temp-value')) {
-        var tv = vEl.querySelector('.vt-temp-value');
-        if (tv) tv.textContent = Number(vessels[i]).toFixed(1);
-      } else if (vEl && vessels[i] != null && !vEl.querySelector) {
-        vEl.textContent = Number(vessels[i]).toFixed(1) + ' \u00B0C';
-      }
-    }
+    applyLiveTempsToUi(temps);
     if (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED') {
       stopStatePolling();
+      disarmAutoTemp('test-ended');
+    }
+  }
+
+  function _fmtTempC(v) {
+    if (v == null || v === '' || isNaN(Number(v))) return '—';
+    return Number(v).toFixed(1) + ' \u00B0C';
+  }
+
+  function applyLiveTempsToUi(temps) {
+    temps = temps || {};
+    var bath = temps.bath;
+    var ext = temps.external != null ? temps.external : temps.ext;
+    var vessels = temps.vessels || [];
+
+    // System info page (no vessel V1–V6 tiles there anymore — bath/ext only)
+    var sysBath = document.getElementById('sysinfo-bath');
+    if (sysBath && bath != null) sysBath.textContent = _fmtTempC(bath);
+    var sysExt = document.getElementById('sysinfo-ext');
+    if (sysExt && ext != null) sysExt.textContent = _fmtTempC(ext);
+
+    // Vessel info page: update max/min/current from real UART-2 samples
+    var vtPage = document.getElementById('page-vessel-temperature');
+    if (vtPage && vtPage.classList.contains('active')) {
+      if (typeof _vtUpdateStatsFromLive === 'function') _vtUpdateStatsFromLive(temps);
+      if (typeof renderVesselTemperaturePage === 'function') renderVesselTemperaturePage(temps);
     }
   }
 
@@ -227,10 +242,54 @@
     }).catch(function () {});
   }
 
+  function startTempUiPolling() {
+    stopTempUiPolling();
+    var tick = function () {
+      window.dissoFetchTemps(false).then(function (data) {
+        if (data) applyLiveTempsToUi(data);
+      }).catch(function () {});
+    };
+    tick();
+    _tempPollTimer = setInterval(tick, 1000);
+  }
+
+  function stopTempUiPolling() {
+    if (_tempPollTimer) {
+      clearInterval(_tempPollTimer);
+      _tempPollTimer = null;
+    }
+  }
+
+  function armAutoTemp(reason) {
+    _autoTempArmed = true;
+    startTempUiPolling();
+    return api('/api/hardware/disso/temperature/auto', {
+      method: 'POST',
+      body: { armed: true, reason: reason || 'ui' }
+    }).then(function (res) {
+      return res.body || {};
+    }).catch(function () { return {}; });
+  }
+
+  function disarmAutoTemp(reason) {
+    _autoTempArmed = false;
+    stopTempUiPolling();
+    return api('/api/hardware/disso/temperature/auto', {
+      method: 'POST',
+      body: { armed: false, reason: reason || 'ui' }
+    }).then(function (res) {
+      return res.body || {};
+    }).catch(function () { return {}; });
+  }
+
   function startStatePolling() {
     stopStatePolling();
     fetchStateNow();
-    // Continuous 1s interval disabled per user requirement.
+    armAutoTemp('test-state');
+    // Pull server state every 2s while a test is live (UART-2 temps via auto stream + UI poll).
+    _pollTimer = setInterval(function () {
+      fetchStateNow();
+    }, 2000);
   }
 
   function stopStatePolling() {
@@ -243,6 +302,11 @@
   }
 
   window.dissoPollStateNow = fetchStateNow;
+  window.dissoApplyLiveTemps = applyLiveTempsToUi;
+  window.dissoArmAutoTemp = armAutoTemp;
+  window.dissoDisarmAutoTemp = disarmAutoTemp;
+  window.dissoStartTempUiPolling = startTempUiPolling;
+  window.dissoStopTempUiPolling = stopTempUiPolling;
 
   window.dissoStartStatePolling = startStatePolling;
   window.dissoStopStatePolling = stopStatePolling;

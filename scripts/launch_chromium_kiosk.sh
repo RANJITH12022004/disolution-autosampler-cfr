@@ -1,5 +1,5 @@
 #!/bin/bash
-# Full-screen Chromium for the Tap Density kiosk (called from ~/.xinitrc or start_kiosk.sh).
+# Full-screen Chromium for the Dissolution Tester kiosk (labwc autostart).
 set -euo pipefail
 
 KIOSK_URL="${KIOSK_URL:-http://127.0.0.1:5000/}"
@@ -23,6 +23,13 @@ exec "$CHROME_BIN" \
   --kiosk \
   --incognito \
   --disable-session-crashed-bubble \
-  --disable-features=TranslateUI \
+  --touch-events=enabled \
+  --enable-touch-drag-drop \
+  --disable-features=TranslateUI,TouchpadAndWheelScrollLatching,AsyncWheelEvents \
+  --disable-translate \
+  --disable-save-password-bubble \
+  --disable-notifications \
+  --no-first-run \
+  --check-for-update-interval=31536000 \
   --window-size=1024,600 \
   --app="${KIOSK_URL%/}"

@@ -188,7 +188,7 @@ def _ingest(inner: str) -> None:
         _broadcast({"kind": "temperature", "data": get_live()})
         return
     upper = (inner or "").upper()
-    if upper in ("TEMP", "TEMP-A-1SEC", "STATUES"):
+    if proto.is_temp_ack(inner):
         return
     st = proto.parse_statues(inner)
     if st:
@@ -203,8 +203,36 @@ def _ingest(inner: str) -> None:
         _broadcast({"kind": "status", "data": st})
 
 
+def arm_auto_temp(reason: str = "") -> Dict[str, Any]:
+    """Arm UART-2 #TEMP-A-1SEC* streaming (and periodic #STATUES*)."""
+    global _auto_armed
+    _auto_armed = True
+    if _logger:
+        _logger.info("[disso_temp] auto-temp ARMED (%s)", reason or "api")
+    if not _simulate:
+        _tx(proto.build_temp_auto_1sec())
+        _tx(proto.build_statues_poll())
+    else:
+        _simulate_tick()
+    return {"ok": True, "armed": True, "reason": reason or ""}
+
+
+def disarm_auto_temp(reason: str = "") -> Dict[str, Any]:
+    """Stop automatic UART-2 streaming; on-demand #TEMP* still works."""
+    global _auto_armed
+    was = bool(_auto_armed)
+    _auto_armed = False
+    if _logger:
+        _logger.info("[disso_temp] auto-temp DISARMED (%s) was=%s", reason or "api", was)
+    return {"ok": True, "armed": False, "wasArmed": was, "reason": reason or ""}
+
+
+def is_auto_temp_armed() -> bool:
+    return bool(_auto_armed)
+
+
 def query_live_temp_now(wait_sec: float = 1.2) -> Dict[str, Any]:
-    """One-shot #TEMP* poll; wait briefly for RX ingest. No continuous polling."""
+    """One-shot #TEMP* poll; wait briefly for RX ingest."""
     if _simulate:
         _simulate_tick()
         return get_live()
@@ -223,7 +251,7 @@ def query_live_temp_now(wait_sec: float = 1.2) -> Dict[str, Any]:
 
 
 def query_live_status_now(wait_sec: float = 1.2) -> Dict[str, Any]:
-    """One-shot #STATUES* poll; wait briefly for RX ingest. No continuous polling."""
+    """One-shot #STATUES* poll (STATUS alias maps to same TX)."""
     if _simulate:
         _simulate_tick()
         return get_live()
@@ -242,16 +270,29 @@ def query_live_status_now(wait_sec: float = 1.2) -> Dict[str, Any]:
 
 
 def _poll_loop() -> None:
-    global _auto_armed
+    """When armed: keep #TEMP-A-1SEC* + #STATUES* alive; otherwise idle."""
+    last_auto_tx = 0.0
+    last_status_tx = 0.0
     while True:
         try:
             if _simulate:
                 _simulate_tick()
                 time.sleep(1.0)
                 continue
-            # Continuous automatic background UART polling disabled per user requirement.
-            # Temperature and status polls occur on-demand when APIs are triggered.
-            time.sleep(2.0)
+            now = time.time()
+            if _auto_armed:
+                # Re-arm auto stream periodically in case ESP reset; CSV arrives async on UART-2.
+                if now - last_auto_tx >= 30.0:
+                    _tx(proto.build_temp_auto_1sec())
+                    last_auto_tx = now
+                if now - last_status_tx >= 2.0:
+                    _tx(proto.build_statues_poll())
+                    last_status_tx = now
+                time.sleep(0.5)
+            else:
+                last_auto_tx = 0.0
+                last_status_tx = 0.0
+                time.sleep(1.0)
         except Exception:
             if _logger:
                 _logger.exception("[disso_temp] poll error")

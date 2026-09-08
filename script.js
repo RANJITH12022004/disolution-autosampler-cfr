@@ -1874,7 +1874,8 @@ var PAGE_TITLES = {
     'validation-run': 'Validation',
     'quick-test': 'Quick Test',
     'test-run': 'Dissolution Test',
-    'vessel-temperature': 'Vessel Temperature'
+    'vessel-temperature': 'Vessel Temperature',
+    'shaft-position': 'Shaft Position'
 };
 
 async function fetchDateTimeFromBackend() {
@@ -2451,7 +2452,7 @@ function goToPage(pageName) {
         typeof _rpmValClearShaftTimers === 'function') {
         _rpmValClearShaftTimers();
     }
-    if (prevPage === 'test-run' && pageName !== 'test-run' && pageName !== 'vessel-temperature' &&
+    if (prevPage === 'test-run' && pageName !== 'test-run' && pageName !== 'vessel-temperature' && pageName !== 'shaft-position' &&
         typeof cleanupDissolutionTestOnLeave === 'function' &&
         !(typeof isDissolutionTestActive === 'function' && isDissolutionTestActive())) {
         cleanupDissolutionTestOnLeave();
@@ -2459,6 +2460,16 @@ function goToPage(pageName) {
     if (prevPage === 'hardware-init' && pageName !== 'hardware-init' &&
         typeof cleanupHardwareInitOnLeave === 'function') {
         cleanupHardwareInitOnLeave();
+    }
+    if (prevPage === 'system-info' && pageName !== 'system-info' && pageName !== 'vessel-temperature') {
+        if (typeof window.dissoDisarmAutoTemp === 'function') {
+            window.dissoDisarmAutoTemp('leave-system-info');
+        }
+    }
+    if (prevPage === 'vessel-temperature' && pageName !== 'vessel-temperature' && pageName !== 'test-run' && pageName !== 'system-info') {
+        if (typeof window.dissoDisarmAutoTemp === 'function') {
+            window.dissoDisarmAutoTemp('leave-vessel-temperature');
+        }
     }
     if (prevPage === 'calibration' && pageName !== 'calibration' &&
         typeof stopTemperatureCalibrationLive === 'function') {
@@ -2474,7 +2485,7 @@ function goToPage(pageName) {
         return;
     }
     if (!_suppressTestRunNavGuardOnce && typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
-        if (pageName !== 'vessel-temperature' && pageName !== 'test-run') {
+        if (pageName !== 'vessel-temperature' && pageName !== 'shaft-position' && pageName !== 'test-run') {
             _dtConfirmAbortForNavigation().then(function (didAbort) {
                 if (!didAbort) return;
                 _suppressTestRunNavGuardOnce = true;
@@ -2572,7 +2583,7 @@ function goToPage(pageName) {
         navActivePage = 'validate';
     } else if (pageName === 'vessel-temperature') {
         navActivePage = (_vesselTempReturnPage === 'system-info') ? 'settings' : 'manage-recipes';
-    } else if (pageName === 'test-run') {
+    } else if (pageName === 'shaft-position' || pageName === 'test-run') {
         navActivePage = 'manage-recipes';
     } else if (pageName === 'report-preview' || pageName === 'view-recipes' || pageName === 'recipe-print-preview') {
         navActivePage = 'reports';
@@ -2602,8 +2613,12 @@ function goToPage(pageName) {
         } else if (pageName === 'test-run') {
             var recipeTitle = '';
             var dtLive = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest;
-            if (dtLive && dtLive.recipe) {
-                recipeTitle = dtLive.recipe.productName || dtLive.recipe.name || '';
+            var liveRecipe = (dtLive && dtLive.recipe) || window.activeTestRecipe || null;
+            if (liveRecipe) {
+                recipeTitle = liveRecipe.productName || liveRecipe.name || '';
+                if (typeof _dtPopulateRunRecipeFields === 'function') {
+                    _dtPopulateRunRecipeFields(liveRecipe);
+                }
             }
             title.textContent = recipeTitle || PAGE_TITLES['test-run'] || 'Dissolution Test';
         } else if (PAGE_TITLES[pageName]) {
@@ -2837,6 +2852,8 @@ function goBack() {
         goToPage('settings');
     } else if (pageId === 'page-vessel-temperature') {
         closeVesselTemperaturePage();
+    } else if (pageId === 'page-shaft-position') {
+        closeShaftPositionPage();
     } else if (pageId === 'page-test-run') {
         if (typeof dissolutionTestBack === 'function') dissolutionTestBack();
         else goToPage('manage-recipes');
@@ -3289,21 +3306,28 @@ function _cancelBiometricEnrollSession() {
 
 function cancelBiometricProgress() {
     _biometricEnrollCancelled = true;
+    var stopSensor = function () {
+        return apiRequest(API_BASE + '/api/biometric/cancel', { method: 'POST', body: {} }).catch(function () {});
+    };
     if (typeof window._loginBiometricAbort === 'function') {
         window._loginBiometricAbort();
         hideBiometricProgressOverlay();
         window._loginBiometricInFlight = false;
         window._loginBiometricAbort = null;
+        stopSensor();
         return;
     }
     if (typeof window._biometricVerifyCancelResolve === 'function') {
         var cancelVerify = window._biometricVerifyCancelResolve;
         window._biometricVerifyCancelResolve = null;
         cancelVerify();
+        stopSensor();
         return;
     }
-    _cancelBiometricEnrollSession().finally(function () {
-        hideBiometricProgressOverlay();
+    stopSensor().finally(function () {
+        _cancelBiometricEnrollSession().finally(function () {
+            hideBiometricProgressOverlay();
+        });
     });
 }
 
@@ -3568,7 +3592,7 @@ function startQuickTest() {
     var ids = [
         'quick-product-name', 'quick-temperature', 'quick-step-count',
         'quick-sample-volume', 'quick-rinse-volume',
-        'quick-power-failure', 'quick-media', 'quick-media-volume', 'quick-media-ph'
+        'quick-power-failure', 'quick-media', 'quick-media-volume', 'quick-media-ph', 'quick-batch-size'
     ];
     ids.forEach(function (id) {
         var el = document.getElementById(id);
@@ -3600,6 +3624,7 @@ function startQuickTestRunFromParams() {
     var mediaEl = document.getElementById('quick-media');
     var mediaVolEl = document.getElementById('quick-media-volume');
     var mediaPhEl = document.getElementById('quick-media-ph');
+    var batchSizeEl = document.getElementById('quick-batch-size');
 
     var productName = nameEl && nameEl.value ? nameEl.value.trim() : '';
     var temperature = tempEl ? parseFloat(tempEl.value) : NaN;
@@ -3613,6 +3638,7 @@ function startQuickTestRunFromParams() {
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
     var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
     var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : '';
     var autoDispense = (mode === 'Auto');
 
     if (!productName) {
@@ -3650,6 +3676,10 @@ function startQuickTestRunFromParams() {
     }
     if (isNaN(mediaPh) || mediaPh < 0 || mediaPh > 14) {
         showAppModal('Please enter media pH between 0 and 14.', 'Quick Test');
+        return;
+    }
+    if (!batchSize) {
+        showAppModal('Please enter batch size.', 'Quick Test');
         return;
     }
     if (!sampleVolume) {
@@ -3695,6 +3725,7 @@ function startQuickTestRunFromParams() {
         media: media,
         mediaVolume: mediaVolume,
         mediaPh: mediaPh,
+        batchSize: batchSize,
         autoDispense: autoDispense,
         sampleVolume: sampleVolume,
         rinseVolume: rinseVolume,
@@ -3784,7 +3815,7 @@ function startRecipeCreation() {
     var ids = [
         'recipe-product-name', 'recipe-temperature', 'recipe-step-count',
         'recipe-sample-volume', 'recipe-rinse-volume',
-        'recipe-power-failure', 'recipe-media', 'recipe-media-volume', 'recipe-media-ph'
+        'recipe-power-failure', 'recipe-media', 'recipe-media-volume', 'recipe-media-ph', 'recipe-batch-size'
     ];
     ids.forEach(function (id) {
         var el = document.getElementById(id);
@@ -3945,6 +3976,7 @@ function validateCreateRecipeStep1Fields() {
     var mediaEl = document.getElementById('recipe-media');
     var mediaVolEl = document.getElementById('recipe-media-volume');
     var mediaPhEl = document.getElementById('recipe-media-ph');
+    var batchSizeEl = document.getElementById('recipe-batch-size');
 
     var productName = nameEl && nameEl.value ? nameEl.value.trim() : '';
     var temperature = tempEl ? parseFloat(tempEl.value) : NaN;
@@ -3958,6 +3990,7 @@ function validateCreateRecipeStep1Fields() {
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
     var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
     var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : '';
 
     if (!productName) {
         showAppModal('Please enter recipe name.', 'Create Recipe');
@@ -3996,6 +4029,10 @@ function validateCreateRecipeStep1Fields() {
         showAppModal('Please enter Media PH between 0 and 14.', 'Create Recipe');
         return null;
     }
+    if (!batchSize) {
+        showAppModal('Please enter batch size.', 'Create Recipe');
+        return null;
+    }
     if (!sampleVolume) {
         showAppModal('Please enter sample volume.', 'Create Recipe');
         return null;
@@ -4012,7 +4049,7 @@ function validateCreateRecipeStep1Fields() {
         showAppModal('Please enter power failure between 1 and 60 minutes.', 'Create Recipe');
         return null;
     }
-    return { stepCount: stepCount, sampleVolume: sampleVolume, media: media, mediaVolume: mediaVolume, mediaPh: mediaPh };
+    return { stepCount: stepCount, sampleVolume: sampleVolume, media: media, mediaVolume: mediaVolume, mediaPh: mediaPh, batchSize: batchSize };
 }
 
 function continueCreateRecipeToSteps() {
@@ -4049,6 +4086,7 @@ function saveDissolutionRecipe() {
     var mediaEl = document.getElementById('recipe-media');
     var mediaVolEl = document.getElementById('recipe-media-volume');
     var mediaPhEl = document.getElementById('recipe-media-ph');
+    var batchSizeEl = document.getElementById('recipe-batch-size');
 
     var productName = nameEl && nameEl.value ? nameEl.value.trim() : '';
     var temperature = tempEl ? parseFloat(tempEl.value) : NaN;
@@ -4061,6 +4099,7 @@ function saveDissolutionRecipe() {
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
     var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
     var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : (validated.batchSize || '');
     var autoDispense = (mode === 'Auto');
 
     renderDissolutionStepRows(stepCount, 'create-recipe-steps-list', window._createRecipeStepPrefill);
@@ -4096,7 +4135,7 @@ function saveDissolutionRecipe() {
         autoDispense: autoDispense,
         sampleVolume: sampleVolume,
         rinseVolume: rinseVolume,
-        batchSize: '',
+        batchSize: batchSize,
         replenishment: replenishment,
         powerFailure: powerFailureMin,
         recipeType: 'dissolution',
@@ -7610,6 +7649,7 @@ function loadRecipeForEdit() {
             var mediaEl = document.getElementById('recipe-media');
             var mediaVolEl = document.getElementById('recipe-media-volume');
             var mediaPhEl = document.getElementById('recipe-media-ph');
+            var batchSizeEl = document.getElementById('recipe-batch-size');
 
             if (nameEl) nameEl.value = r.productName || r.name || '';
             if (tempEl && r.temperature != null) tempEl.value = String(r.temperature);
@@ -7628,6 +7668,7 @@ function loadRecipeForEdit() {
             if (mediaEl) mediaEl.value = r.media || '';
             if (mediaVolEl) mediaVolEl.value = r.mediaVolume || '';
             if (mediaPhEl && r.mediaPh != null) mediaPhEl.value = String(r.mediaPh);
+            if (batchSizeEl) batchSizeEl.value = r.batchSize != null ? String(r.batchSize) : '';
             if (repEl) repEl.value = (r.replenishment === 'No') ? 'No' : 'Yes';
             if (pfEl) {
                 var pfMin = parseInt(r.powerFailure, 10);
@@ -7839,17 +7880,26 @@ function _finalizeRecipeLoad(recipe, ctx) {
         pendingRecipeToLoad = null;
         return;
     }
-    recipe.batchNumber1 = (resolvedCtx.batchNumber1 || recipe.batchNumber || '--');
-    recipe.batchNumber = recipe.batchNumber1;
-    recipe.batchNumber2 = null;
-    recipe.arNumber = (resolvedCtx.arNumber || recipe.arNumber || '--');
+    // Keep a full copy of the loaded recipe (API payload includes media / steps / etc.).
+    var runRecipe;
+    try {
+        runRecipe = JSON.parse(JSON.stringify(recipe));
+    } catch (e) {
+        runRecipe = Object.assign({}, recipe);
+        if (Array.isArray(recipe.steps)) runRecipe.steps = recipe.steps.slice();
+    }
+    runRecipe.batchNumber1 = (resolvedCtx.batchNumber1 || runRecipe.batchNumber || '--');
+    runRecipe.batchNumber = runRecipe.batchNumber1;
+    runRecipe.batchNumber2 = null;
+    runRecipe.arNumber = (resolvedCtx.arNumber || runRecipe.arNumber || '--');
+    if (!runRecipe.recipeType) runRecipe.recipeType = 'dissolution';
     pendingRecipeLoadContext = null;
     pendingRecipeToLoad = null;
-    logAuditEvent('Loaded recipe', (recipe.productName || 'Recipe') + ', AR ' + (recipe.arNumber || '--') + ', batch ' + (recipe.batchNumber || '--'), {
+    logAuditEvent('Loaded recipe', (runRecipe.productName || 'Recipe') + ', AR ' + (runRecipe.arNumber || '--') + ', batch ' + (runRecipe.batchNumber || '--'), {
         eventType: 'lifecycle'
     });
-    window.activeTestRecipe = recipe;
-    startTestRun(recipe);
+    window.activeTestRecipe = runRecipe;
+    startTestRun(runRecipe);
 }
 
 function confirmBatchNumberAndLoad() {
@@ -11237,6 +11287,9 @@ function loadSystemInfo() {
 
 function initSystemInfoPage() {
     loadSystemInfo();
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('system-info');
+    }
 }
 
 var _hwInitAborted = false;
@@ -11832,11 +11885,32 @@ function startTestRun(recipe) {
         showAppModal('Only Dissolution recipes can be loaded for testing.', 'Load Recipe');
         return;
     }
-    window.activeTestRecipe = recipe;
+    // Deep-clone so Load Recipe / Quick Test always carry media, AR, batch, steps, etc.
+    var runRecipe;
+    try {
+        runRecipe = JSON.parse(JSON.stringify(recipe));
+    } catch (e) {
+        runRecipe = Object.assign({}, recipe);
+        if (Array.isArray(recipe.steps)) runRecipe.steps = recipe.steps.slice();
+    }
+    window.activeTestRecipe = runRecipe;
+    // Init first so goToPage title/populate can read _dissolutionTest.recipe.
+    initDissolutionTestRun(runRecipe);
     goToPage('test-run');
-    initDissolutionTestRun(recipe);
+    // Ensure fields bind after the page is active (RBAC / paint race).
+    _dtPopulateRunRecipeFields(runRecipe);
+    if (_dissolutionTest && _dissolutionTest.steps && _dissolutionTest.steps.length) {
+        _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
+    }
+    setTimeout(function () {
+        if (!_dissolutionTest || !_dissolutionTest.recipe) return;
+        _dtPopulateRunRecipeFields(_dissolutionTest.recipe);
+        if (_dissolutionTest.steps && _dissolutionTest.steps.length) {
+            _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
+        }
+    }, 50);
     // On Load: send SET-TEMP → TS → RPM → DUR → SML → FL → AUTO-DROP (Start only sends START-TEST).
-    _dtUploadRecipeToEsp(recipe);
+    _dtUploadRecipeToEsp(runRecipe);
 }
 
 function _dtUploadRecipeToEsp(recipe) {
@@ -11845,6 +11919,7 @@ function _dtUploadRecipeToEsp(recipe) {
         return;
     }
     _dtSetPrimaryButton('disabled');
+    _dtSetStatus('Preparing recipe…', 'ready');
     window.dissoUploadRecipe(recipe).then(function () {
         if (_dissolutionTest) _dissolutionTest.recipeUploaded = true;
         if (_dissolutionTest && !_dissolutionTest.running) {
@@ -11855,15 +11930,21 @@ function _dtUploadRecipeToEsp(recipe) {
                 eventType: 'lifecycle'
             });
         }
-        _dtSetStatus('Recipe loaded to ESP. Press Preheat when ready.', 'ready');
-    }).catch(function (err) {
+        _dtSetStatus('Press Preheat when ready.', 'ready');
+    }).catch(function () {
+        // Silent product UX: no protocol / ESP error modal. Allow retry via Preheat/Start path.
         if (_dissolutionTest) _dissolutionTest.recipeUploaded = false;
         _dtResetPreheatUi();
-        showAppModal(
-            (err && err.message) ? err.message : 'Failed to load recipe to ESP (SET-TEMP/TS/RPM/DUR/SML/FL/AUTO-DROP).',
-            'Load Recipe'
-        );
-        _dtSetStatus('Recipe load to ESP failed', 'aborted');
+        _dtSetStatus('Press Preheat when ready.', 'ready');
+        // One quiet retry
+        setTimeout(function () {
+            if (!_dissolutionTest || _dissolutionTest.recipeUploaded || _dissolutionTest.running) return;
+            window.dissoUploadRecipe(recipe).then(function () {
+                if (_dissolutionTest) _dissolutionTest.recipeUploaded = true;
+                if (_dissolutionTest && !_dissolutionTest.running) _dtResetPreheatUi();
+                _dtSetStatus('Press Preheat when ready.', 'ready');
+            }).catch(function () {});
+        }, 1500);
     });
 }
 
@@ -11882,6 +11963,31 @@ function _dtSetText(id, text) {
     var el = _dtEl(id);
     if (el) el.textContent = text != null ? String(text) : '--';
 }
+
+/** Push recipe identity + run params into the test-run DOM (AR/batch/media/etc.). */
+function _dtPopulateRunRecipeFields(recipe) {
+    recipe = recipe || {};
+    var usp = recipe.usp || recipe.uspMode || '';
+    var recipeName = recipe.productName || recipe.name || '--';
+    var hiddenName = document.getElementById('dt-recipe-name');
+    if (hiddenName) hiddenName.textContent = recipeName;
+
+    _dtSetText('dt-batch-number', recipe.batchNumber || recipe.batchNumber1 || '--');
+    _dtSetText('dt-batch-size', recipe.batchSize != null && String(recipe.batchSize).trim() !== '' ? recipe.batchSize : '--');
+    _dtSetText('dt-mode', recipe.mode || '--');
+    _dtSetText('dt-usp', usp || '--');
+    _dtSetText('dt-ar-number', recipe.arNumber || '--');
+    _dtSetText('dt-media', recipe.media || '--');
+    _dtSetText('dt-media-volume', recipe.mediaVolume != null && String(recipe.mediaVolume).trim() !== '' ? recipe.mediaVolume : '--');
+    _dtSetText('dt-media-ph', recipe.mediaPh != null && recipe.mediaPh !== '' ? recipe.mediaPh : '--');
+    _dtSetText('dt-replenishment', recipe.replenishment != null && String(recipe.replenishment).trim() !== '' ? recipe.replenishment : '--');
+    _dtSetText('dt-power-failure', formatPowerFailureDisplay(recipe.powerFailure));
+    _dtSetText('dt-temperature', recipe.temperature != null && recipe.temperature !== '' ? recipe.temperature : '--');
+    _dtSetText('dt-sample-volume', recipe.sampleVolume || '--');
+    _dtSetText('dt-rinse-volume', recipe.rinseVolume || '--');
+}
+
+window._dtPopulateRunRecipeFields = _dtPopulateRunRecipeFields;
 
 function _dtFormatHms(sec) {
     if (typeof formatSecondsAsHhMmSs === 'function') return formatSecondsAsHhMmSs(sec);
@@ -12080,7 +12186,7 @@ function initDissolutionTestRun(recipe) {
     _dtStopPreheatTimer();
     _dtStopTimer();
     _dtClearShaftTimers();
-    var usp = recipe.usp || recipe.uspMode || '';
+    recipe = recipe || {};
     _dissolutionTest = {
         recipe: recipe,
         steps: Array.isArray(recipe.steps) ? recipe.steps.slice() : [],
@@ -12104,26 +12210,17 @@ function initDissolutionTestRun(recipe) {
         shaftDownDisabled: false
     };
     window._dissolutionTest = _dissolutionTest;
+    window.activeTestRecipe = recipe;
 
     var recipeName = recipe.productName || recipe.name || '--';
-    _dtSetText('dt-recipe-name', recipeName);
+    // Recipe name only in app header — not duplicated inside the test page.
     if (typeof setShellPageTitle === 'function') {
         setShellPageTitle(recipeName);
     } else {
-        var titleEl = document.getElementById('page-title') || document.querySelector('.header-title');
+        var titleEl = document.getElementById('header-title') || document.getElementById('page-title');
         if (titleEl) titleEl.textContent = recipeName;
     }
-    _dtSetText('dt-batch-number', recipe.batchNumber || recipe.batchNumber1 || '--');
-    _dtSetText('dt-batch-size', recipe.batchSize != null && recipe.batchSize !== '' ? recipe.batchSize : '--');
-    _dtSetText('dt-mode', recipe.mode || '--');
-    _dtSetText('dt-usp', usp || '--');
-    _dtSetText('dt-ar-number', recipe.arNumber || '--');
-    _dtSetText('dt-media', recipe.media || recipe.mediaVolume || '--');
-    _dtSetText('dt-media-ph', recipe.mediaPh != null ? recipe.mediaPh : '--');
-    _dtSetText('dt-power-failure', formatPowerFailureDisplay(recipe.powerFailure));
-    _dtSetText('dt-temperature', recipe.temperature != null ? recipe.temperature : '--');
-    _dtSetText('dt-sample-volume', recipe.sampleVolume || '--');
-    _dtSetText('dt-rinse-volume', recipe.rinseVolume || '--');
+    _dtPopulateRunRecipeFields(recipe);
 
     _dtApplyStep(0, true);
     _dtSetControlsIdle();
@@ -12131,6 +12228,20 @@ function initDissolutionTestRun(recipe) {
     _dtSetStatus('Press Preheat to begin.', 'ready');
     _dtResetShaftButtons();
     stirrerUnitCommand('stop');
+    // Re-apply after paint — page may still be toggling .active when goToPage runs.
+    setTimeout(function () {
+        if (_dissolutionTest && _dissolutionTest.recipe) {
+            _dtPopulateRunRecipeFields(_dissolutionTest.recipe);
+            if (_dissolutionTest.steps && _dissolutionTest.steps.length) {
+                _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
+            }
+        }
+    }, 0);
+    // UART-2 live vessel temps are shown on the Vessels info page only.
+    // Keep server state polling for the run; do not arm temp UI stream for this screen.
+    if (typeof window.dissoStartStatePolling === 'function') {
+        window.dissoStartStatePolling();
+    }
 }
 
 function _dtApplyStep(index, resetRemaining) {
@@ -12385,7 +12496,7 @@ function dissolutionTestStart() {
     if (dt.preheating) { showAppModal('Preheat is still in progress.', 'Preheat'); return; }
     if (dt.running && !dt.paused) return;
     if (!dt.paused && dt.recipeUploaded === false) {
-        showAppModal('Recipe is still loading to ESP (or load failed). Wait for load to finish, or reload the recipe.', 'Test');
+        showAppModal('Recipe is still preparing. Please wait a moment, then try again.', 'Test');
         return;
     }
 
@@ -12530,10 +12641,6 @@ function _dtAppendTempLogSample() {
         window.dissoFetchTemps(true).then(function (data) {
             if (!_dissolutionTest) return;
             pushSample(data && data.bath);
-            var bathEl = document.getElementById('dt-bath-temp');
-            if (bathEl && data && data.bath != null) {
-                bathEl.textContent = Number(data.bath).toFixed(1) + ' \u00B0C';
-            }
         }).catch(function () {
             pushSample(null);
         });
@@ -12777,10 +12884,57 @@ function cleanupDissolutionTestOnLeave() {
         _dissolutionTest.paused = false;
         _dissolutionTest.preheating = false;
     }
+    if (typeof window.dissoDisarmAutoTemp === 'function') {
+        window.dissoDisarmAutoTemp('leave-test-run');
+    }
+    if (typeof window.dissoStopStatePolling === 'function') {
+        window.dissoStopStatePolling();
+    }
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
 }
 
 var _vesselTempReturnPage = 'test-run';
+/** Per-vessel UART-2 stats: current = live, max/min from observed live samples. */
+var _vtTempStats = null;
+var _vtBathExt = { bath: null, external: null };
+
+function _vtResetTempStats() {
+    _vtTempStats = [];
+    for (var i = 0; i < 6; i++) {
+        _vtTempStats.push({ current: null, max: null, min: null });
+    }
+    _vtBathExt = { bath: null, external: null };
+}
+
+function _vtFmt(v) {
+    if (v == null || isNaN(Number(v))) return '—';
+    return Number(v).toFixed(1);
+}
+
+function _vtUpdateStatsFromLive(live) {
+    if (!_vtTempStats) _vtResetTempStats();
+    live = live || {};
+    if (live.bath != null && !isNaN(Number(live.bath))) _vtBathExt.bath = Number(live.bath);
+    var ext = live.external != null ? live.external : live.ext;
+    if (ext != null && !isNaN(Number(ext))) _vtBathExt.external = Number(ext);
+    var vessels = Array.isArray(live.vessels) ? live.vessels : [];
+    for (var i = 0; i < 6; i++) {
+        if (vessels[i] == null || isNaN(Number(vessels[i]))) continue;
+        var cur = Number(vessels[i]);
+        var st = _vtTempStats[i];
+        st.current = cur;
+        st.max = (st.max == null) ? cur : Math.max(st.max, cur);
+        st.min = (st.min == null) ? cur : Math.min(st.min, cur);
+    }
+}
+
+function openShaftPositionPage() {
+    goToPage('shaft-position');
+}
+
+function closeShaftPositionPage() {
+    goToPage('test-run');
+}
 
 function openVesselTemperaturePage(returnPage) {
     var from = String(returnPage || '').trim();
@@ -12789,76 +12943,164 @@ function openVesselTemperaturePage(returnPage) {
         from = (active === 'system-info') ? 'system-info' : 'test-run';
     }
     _vesselTempReturnPage = (from === 'system-info') ? 'system-info' : 'test-run';
+    _vtResetTempStats();
     if (typeof renderVesselTemperaturePage === 'function') renderVesselTemperaturePage();
     goToPage('vessel-temperature');
-    // One-shot poll only when Info is opened (no continuous polling)
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('vessel-temperature');
+    }
     if (typeof window.dissoFetchTemps === 'function') {
         window.dissoFetchTemps(true).then(function (data) {
-            if (data && typeof renderVesselTemperaturePage === 'function') {
-                renderVesselTemperaturePage(data);
+            if (data) {
+                _vtUpdateStatsFromLive(data);
+                if (typeof renderVesselTemperaturePage === 'function') renderVesselTemperaturePage(data);
             }
         }).catch(function () {});
     }
 }
 
 function closeVesselTemperaturePage() {
+    if (_vesselTempReturnPage !== 'test-run' && typeof window.dissoDisarmAutoTemp === 'function') {
+        window.dissoDisarmAutoTemp('leave-vessel-temperature');
+    }
     goToPage(_vesselTempReturnPage || 'test-run');
 }
 
 function renderVesselTemperaturePage(live) {
-    var setpoint = (_dissolutionTest && _dissolutionTest.recipe && _dissolutionTest.recipe.temperature) ? parseFloat(_dissolutionTest.recipe.temperature) : 37.0;
+    if (live) _vtUpdateStatsFromLive(live);
+    if (!_vtTempStats) _vtResetTempStats();
+
+    var setpoint = (_dissolutionTest && _dissolutionTest.recipe && _dissolutionTest.recipe.temperature)
+        ? parseFloat(_dissolutionTest.recipe.temperature)
+        : NaN;
     var warnDelta = 0.5;
-    var liveVessels = (live && Array.isArray(live.vessels)) ? live.vessels : null;
+
+    var bathEl = document.getElementById('vt-bath-temp');
+    if (bathEl) {
+        bathEl.textContent = _vtBathExt.bath != null ? (_vtFmt(_vtBathExt.bath) + ' °C') : '—';
+    }
+    var extEl = document.getElementById('vt-ext-temp');
+    if (extEl) {
+        extEl.textContent = _vtBathExt.external != null ? (_vtFmt(_vtBathExt.external) + ' °C') : '—';
+    }
+
+    var highId = null, lowId = null, highVal = -Infinity, lowVal = Infinity;
     var vessels = [];
     for (var i = 0; i < 6; i++) {
-        var cur = (liveVessels && liveVessels[i] != null && !isNaN(Number(liveVessels[i])))
-            ? Number(liveVessels[i])
-            : setpoint;
+        var st = _vtTempStats[i] || { current: null, max: null, min: null };
+        var cur = st.current;
         vessels.push({
             id: i + 1,
             current: cur,
-            max: cur,
-            min: cur
+            max: st.max,
+            min: st.min
         });
+        if (cur != null && !isNaN(cur)) {
+            if (cur > highVal) { highVal = cur; highId = i + 1; }
+            if (cur < lowVal) { lowVal = cur; lowId = i + 1; }
+        }
     }
-    if (!liveVessels) {
-        // Placeholder layout until first on-demand poll returns
-        vessels = [
-            { id: 1, current: setpoint, max: setpoint, min: setpoint },
-            { id: 2, current: setpoint, max: setpoint, min: setpoint },
-            { id: 3, current: setpoint, max: setpoint, min: setpoint },
-            { id: 4, current: setpoint, max: setpoint, min: setpoint },
-            { id: 5, current: setpoint, max: setpoint, min: setpoint },
-            { id: 6, current: setpoint, max: setpoint, min: setpoint }
-        ];
+
+    var vesselTones = {
+        1: { main: '#38bdf8', deep: '#0284c7', glow: '#7dd3fc' },
+        2: { main: '#f87171', deep: '#dc2626', glow: '#fca5a5' },
+        3: { main: '#fb923c', deep: '#ea580c', glow: '#fdba74' },
+        4: { main: '#facc15', deep: '#ca8a04', glow: '#fde047' },
+        5: { main: '#4ade80', deep: '#16a34a', glow: '#86efac' },
+        6: { main: '#22d3ee', deep: '#0891b2', glow: '#67e8f9' }
+    };
+
+    function _vtVesselIconSvg(id) {
+        var tone = vesselTones[id] || vesselTones[1];
+        var gid = 'vt' + id;
+        return (
+            '<svg class="vt-vessel-svg" viewBox="0 0 64 88" aria-hidden="true">' +
+                '<defs>' +
+                    '<linearGradient id="' + gid + '-glass" x1="12" y1="14" x2="52" y2="14" gradientUnits="userSpaceOnUse">' +
+                        '<stop offset="0%" stop-color="#94a3b8" stop-opacity="0.35"/>' +
+                        '<stop offset="35%" stop-color="#f8fafc" stop-opacity="0.55"/>' +
+                        '<stop offset="70%" stop-color="#e2e8f0" stop-opacity="0.28"/>' +
+                        '<stop offset="100%" stop-color="#64748b" stop-opacity="0.4"/>' +
+                    '</linearGradient>' +
+                    '<linearGradient id="' + gid + '-liq" x1="32" y1="40" x2="32" y2="78" gradientUnits="userSpaceOnUse">' +
+                        '<stop offset="0%" stop-color="' + tone.glow + '"/>' +
+                        '<stop offset="55%" stop-color="' + tone.main + '"/>' +
+                        '<stop offset="100%" stop-color="' + tone.deep + '"/>' +
+                    '</linearGradient>' +
+                    '<linearGradient id="' + gid + '-rim" x1="8" y1="10" x2="56" y2="18" gradientUnits="userSpaceOnUse">' +
+                        '<stop offset="0%" stop-color="#64748b"/>' +
+                        '<stop offset="45%" stop-color="#f1f5f9"/>' +
+                        '<stop offset="100%" stop-color="#475569"/>' +
+                    '</linearGradient>' +
+                    '<clipPath id="' + gid + '-clip">' +
+                        '<path d="M18 20 V58 C18 72 24 78 32 78 C40 78 46 72 46 58 V20 Z"/>' +
+                    '</clipPath>' +
+                '</defs>' +
+                // outer glass body
+                '<path d="M18 20 V58 C18 72 24 78 32 78 C40 78 46 72 46 58 V20 Z" ' +
+                    'fill="url(#' + gid + '-glass)" stroke="#cbd5e1" stroke-width="1.6" stroke-linejoin="round"/>' +
+                // liquid fill
+                '<g clip-path="url(#' + gid + '-clip)">' +
+                    '<path d="M18 42 V58 C18 72 24 78 32 78 C40 78 46 72 46 58 V42 Z" fill="url(#' + gid + '-liq)"/>' +
+                    '<ellipse cx="32" cy="42" rx="14" ry="3.2" fill="' + tone.glow + '" opacity="0.95"/>' +
+                    '<ellipse cx="32" cy="41" rx="8" ry="1.4" fill="#ffffff" opacity="0.35"/>' +
+                '</g>' +
+                // flared rim
+                '<ellipse cx="32" cy="16" rx="20" ry="5.5" fill="url(#' + gid + '-rim)" stroke="#94a3b8" stroke-width="1.4"/>' +
+                '<ellipse cx="32" cy="14.5" rx="14" ry="3.2" fill="#f8fafc" opacity="0.55"/>' +
+                // glass highlight
+                '<path d="M23 24 V60" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" opacity="0.45"/>' +
+                '<path d="M41 26 V58" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round" opacity="0.35"/>' +
+            '</svg>'
+        );
     }
-    var highId = null, lowId = null, highVal = -Infinity, lowVal = Infinity;
-    vessels.forEach(function (v) {
-        if (v.current > highVal) { highVal = v.current; highId = v.id; }
-        if (v.current < lowVal) { lowVal = v.current; lowId = v.id; }
-    });
+
     vessels.forEach(function (v) {
         var el = document.getElementById('vt-vessel-' + v.id);
         if (!el) return;
-        var intra = (Math.round((v.max - v.min) * 10) / 10).toFixed(1);
-        el.classList.toggle('is-warn', Math.abs(v.current - setpoint) > warnDelta);
-        el.classList.toggle('is-high', v.id === highId);
-        el.classList.toggle('is-low', v.id === lowId);
+        var hasCur = v.current != null && !isNaN(v.current);
+        var maxV = v.max != null ? v.max : v.current;
+        var minV = v.min != null ? v.min : v.current;
+        var deltaText = '—';
+        if (hasCur && !isNaN(setpoint)) {
+            var d = Math.round((v.current - setpoint) * 10) / 10;
+            deltaText = (d > 0 ? '+' : '') + d.toFixed(1);
+        } else if (hasCur && maxV != null && minV != null) {
+            deltaText = (Math.round((maxV - minV) * 10) / 10).toFixed(1);
+        }
+        var warn = hasCur && !isNaN(setpoint) && Math.abs(v.current - setpoint) > warnDelta;
+        el.classList.toggle('is-warn', !!warn);
+        el.classList.toggle('is-high', hasCur && v.id === highId);
+        el.classList.toggle('is-low', hasCur && v.id === lowId);
+        el.classList.toggle('is-live', !!hasCur);
         el.innerHTML =
-            '<span class="vt-badge">V' + v.id + '</span>' +
-            '<div class="vt-vessel-icon-wrap">' +
-                '<img src="./assets/vessel.svg" alt="">' +
-                '<div class="vt-temp-inside"><span class="vt-temp-value">' + v.current.toFixed(1) + '</span><span class="vt-temp-unit"> \u00B0C</span></div>' +
+            '<div class="vt-vessel-top">' +
+                '<span class="vt-badge">V' + v.id + '</span>' +
+                '<span class="vt-live-pill' + (hasCur ? ' is-on' : '') + '">' +
+                    '<span class="vt-live-dot" aria-hidden="true"></span>LIVE' +
+                '</span>' +
+            '</div>' +
+            '<div class="vt-vessel-body">' +
+                '<div class="vt-vessel-icon-wrap">' + _vtVesselIconSvg(v.id) + '</div>' +
+                '<div class="vt-live-block">' +
+                    '<span class="vt-live-label">LIVE</span>' +
+                    '<div class="vt-temp-row">' +
+                        '<span class="vt-temp-value">' + _vtFmt(v.current) + '</span>' +
+                        (hasCur ? '<span class="vt-temp-unit">°C</span>' : '') +
+                    '</div>' +
+                '</div>' +
             '</div>' +
             '<div class="vt-meta">' +
-                '<div class="vt-meta-item"><span class="vt-meta-key">Max</span><span class="vt-meta-val">' + v.max.toFixed(1) + '</span></div>' +
-                '<div class="vt-meta-item"><span class="vt-meta-key">Min</span><span class="vt-meta-val">' + v.min.toFixed(1) + '</span></div>' +
-                '<div class="vt-meta-item"><span class="vt-meta-key">\u0394</span><span class="vt-meta-val">' + intra + '</span></div>' +
+                '<div class="vt-meta-item"><span class="vt-meta-key">MAX</span><span class="vt-meta-val">' +
+                    (maxV != null && !isNaN(maxV) ? (_vtFmt(maxV) + ' °C') : '—') +
+                '</span></div>' +
+                '<div class="vt-meta-item"><span class="vt-meta-key">MIN</span><span class="vt-meta-val">' +
+                    (minV != null && !isNaN(minV) ? (_vtFmt(minV) + ' °C') : '—') +
+                '</span></div>' +
+                '<div class="vt-meta-item"><span class="vt-meta-key">Δ</span><span class="vt-meta-val">' +
+                    (deltaText === '—' ? '—' : (deltaText + ' °C')) +
+                '</span></div>' +
             '</div>';
     });
-    var interEl = document.getElementById('vt-inter-delta');
-    var interHint = document.getElementById('vt-inter-hint');
-    if (interEl) interEl.textContent = (Math.round((highVal - lowVal) * 10) / 10).toFixed(1);
-    if (interHint) interHint.textContent = 'High V' + highId + ' \u2212 Low V' + lowId;
-}   
+}
 

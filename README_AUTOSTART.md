@@ -1,94 +1,48 @@
-# Kiosk Autostart Setup Instructions
+# Kiosk Autostart (Dissolution Tester)
 
-This document describes how to enable automatic startup of the kiosk application on Raspberry Pi boot.
+Production boot is **CLI / terminal mode**, not the full Raspberry Pi desktop.
 
-## Prerequisites
+## Boot model
 
-- Raspberry Pi with Raspbian OS
-- All application files installed in `/opt/kiosk/`
-- Python 3 installed
-- Chromium browser installed (for kiosk mode)
+1. `systemd` default target: **`multi-user.target`** (console)
+2. `getty@tty1` autologins user `rle`
+3. `/home/rle/.bash_profile` starts **labwc** in a restart loop (Wayland kiosk seat)
+4. `~/.config/labwc/autostart` runs kanshi + display fix, waits for Flask, launches Chromium
+5. Flask API/UI: **`kiosk-bridge.service`** → `/opt/kiosk/run_hardness_bridge.sh` → `bridge.py` / `app.py` on `:5000`
 
-## Setup Steps
+Do **not** enable `graphical.target` / LightDM for this machine. LightDM should stay disabled so it cannot fight the console kiosk path.
 
-### 1. Copy Systemd Service File
+## Key files
 
-Copy the service file to the systemd directory:
+| Role | Path |
+|------|------|
+| Console → labwc | `/home/rle/.bash_profile` |
+| Labwc autostart | `/home/rle/.config/labwc/autostart` |
+| Bridge unit | `/etc/systemd/system/kiosk-bridge.service` (source: `/opt/kiosk/kiosk-bridge.service`) |
+| Ready wait | `/opt/kiosk/scripts/wait_kiosk_bridge_ready.sh` |
+| Chromium | `/opt/kiosk/scripts/launch_chromium_kiosk.sh` |
+| Display | `/opt/kiosk/scripts/set_kiosk_display.sh`, `~/.config/kanshi/config` |
 
-```bash
-sudo cp /opt/kiosk/kiosk.service /etc/systemd/system/kiosk.service
-```
-
-### 2. Reload Systemd
-
-Reload systemd to recognize the new service:
-
-```bash
-sudo systemctl daemon-reload
-```
-
-### 3. Enable the Service
-
-Enable the service to start automatically on boot:
+## Service commands
 
 ```bash
-sudo systemctl enable kiosk.service
+sudo systemctl status kiosk-bridge
+sudo systemctl restart kiosk-bridge
+journalctl -u kiosk-bridge -n 80 --no-pager
+tail -f ~/kiosk_bridge.log ~/kiosk_chrome.log ~/kiosk_wayland.log
 ```
 
-### 4. Start the Service
+## Blank screen troubleshooting
 
-Start the service immediately (optional, to test without rebooting):
+1. Confirm CLI boot: `systemctl get-default` → `multi-user.target`
+2. Confirm bridge: `systemctl is-active kiosk-bridge`
+3. Confirm compositor: `pgrep -a labwc`
+4. Confirm browser: `pgrep -a chromium`
+5. Read `~/kiosk_wayland.log` (labwc DRM/seat failures used to exit once and leave a blank tty; the bash_profile loop now restarts labwc)
 
-```bash
-sudo systemctl start kiosk.service
-```
-
-### 5. Verify Service Status
-
-Check if the service is running:
-
-```bash
-sudo systemctl status kiosk.service
-```
-
-### 6. View Logs
-
-View the application logs:
-
-```bash
-tail -f /var/log/kiosk_bridge.log
-```
-
-## Service Management Commands
-
-- **Start service**: `sudo systemctl start kiosk.service`
-- **Stop service**: `sudo systemctl stop kiosk.service`
-- **Restart service**: `sudo systemctl restart kiosk.service`
-- **Disable autostart**: `sudo systemctl disable kiosk.service`
-- **Check status**: `sudo systemctl status kiosk.service`
-
-## Troubleshooting
-
-### Service fails to start
-
-1. Check logs: `sudo journalctl -u kiosk.service -n 50`
-2. Verify file permissions: Ensure `/opt/kiosk/bridge.py` is executable
-3. Check Python path: Verify `/usr/bin/python3` exists
-4. Check working directory: Ensure `/opt/kiosk/` exists and contains all files
-
-### Chromium not starting in kiosk mode
-
-The `start_kiosk.sh` script attempts to start Chromium, but this may require:
-- X server running (if using desktop environment)
-- Display manager configured
-- User session with display access
-
-For headless operation, you may need to configure X11 forwarding or use a different display method.
+WaveShare is on **HDMI-A-2** at position 0,0. Phantom **HDMI-A-1** (empty EDID) must stay **disabled** — if it stays enabled at (0,0), Chromium opens on the phantom head and the physical panel looks like a blank terminal. `set_kiosk_display.sh` and kanshi enforce this; cmdline must not force `video=HDMI-A-1`.
 
 ## Notes
 
-- The service runs as `root` user. For production, consider creating a dedicated `kiosk` user.
-- Logs are written to `/var/log/kiosk_bridge.log`
-- The service automatically restarts on failure (RestartSec=3)
-- Network target ensures network is available before starting
-
+- There is no `kiosk.service` that starts Chromium. Only `kiosk-bridge.service` is systemd-managed for the app; the GUI depends on tty1 + labwc.
+- Orphan helpers (`start_kiosk.sh`, `.xinitrc`) are not the production path.

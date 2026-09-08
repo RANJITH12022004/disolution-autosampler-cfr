@@ -305,14 +305,17 @@ def parse_temperature_csv(inner_or_line: str) -> Optional[Dict[str, Any]]:
 
 def parse_statues(inner: str) -> Optional[Dict[str, Any]]:
     """
-    Parse #STATUES* replies:
-      IDEL
+    Parse #STATUES* / #STATUS* replies:
+      IDEL / IDLE
       TEST-RUNNING,ST-03/07,00:05:00/00:04:30
     """
     s = (inner or "").strip()
     if not s:
         return None
     upper = s.upper()
+    # Bare ACK / command echo — not a status payload
+    if upper in ("STATUES", "STATUS", "TEMP", "TEMP-A-1SEC"):
+        return None
     if upper in ("IDEL", "IDLE"):
         return {"state": "IDLE", "raw": s}
     if upper.startswith("TEST-RUNNING") or upper.startswith("TEST_RUNNING"):
@@ -472,4 +475,27 @@ def build_temp_auto_1sec() -> str:
 
 
 def build_statues_poll() -> str:
+    """Firmware spelling is STATUES (Auto sampler disso comm.txt)."""
     return wrap("STATUES")
+
+
+def build_status_poll() -> str:
+    """Alias TX for hosts that speak STATUS; firmware expects STATUES."""
+    return build_statues_poll()
+
+
+def is_temp_ack(inner: str) -> bool:
+    upper = (inner or "").strip().upper()
+    return upper in ("TEMP", "TEMP-A-1SEC", "STATUES", "STATUS")
+
+
+def is_status_frame(inner: str) -> bool:
+    """True when inner looks like a statues/status payload (not a bare ACK name)."""
+    upper = (inner or "").strip().upper()
+    if not upper or upper in ("TEMP", "TEMP-A-1SEC", "STATUES", "STATUS"):
+        return False
+    if upper in ("IDEL", "IDLE", "PAUSED"):
+        return True
+    if upper.startswith("TEST-RUNNING") or upper.startswith("TEST_RUNNING"):
+        return True
+    return False

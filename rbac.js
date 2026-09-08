@@ -155,7 +155,9 @@ var SCREEN_FEATURE_MAP = {
   login: 'login',
   home: 'dashboard',
   'quick-test': 'quick-test',
+  'test-run': 'recipe-test',
   'vessel-temperature': 'recipe-test',
+  'shaft-position': 'recipe-test',
   'manage-recipes': 'recipe-manage',
   'create-recipe-step1': 'recipe-manage',
   'create-recipe-step2': 'recipe-manage',
@@ -393,9 +395,13 @@ function checkNavigationAccess(screenId) {
     var mode = (typeof window !== 'undefined' && window.recipeListMode) ? window.recipeListMode : 'manage';
     featureKey = mode === 'load' ? 'recipe-test' : 'recipe-manage';
   }
-  if (screenId === 'vessel-temperature') {
+  if (screenId === 'vessel-temperature' || screenId === 'shaft-position') {
     var u = window.currentUser || role;
     return canAccess(u, 'recipe-test') || canAccess(u, 'settings');
+  }
+  if (screenId === 'test-run') {
+    var tu = window.currentUser || role;
+    return canAccess(tu, 'recipe-test') || canAccess(tu, 'quick-test');
   }
   return canAccess(window.currentUser || role, featureKey);
 }

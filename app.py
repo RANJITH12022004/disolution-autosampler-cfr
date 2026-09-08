@@ -4665,9 +4665,25 @@ def biometric_enroll_cancel():
         username = str(payload.get("username") or "").strip()
         if username:
             _clear_enroll_session(username)
-        return jsonify({"ok": True}), 200
+        try:
+            biometric_service.cancel_and_idle()
+        except Exception:
+            pass
+        return jsonify({"ok": True, "cancelled": True}), 200
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/biometric/cancel", methods=["POST"])
+def biometric_cancel():
+    """Cancel in-flight login/identify/enroll scan and idle Aura LED (DT parity)."""
+    try:
+        result = biometric_service.cancel_and_idle()
+        return jsonify(result), 200
+    except Exception as e:
+        app.logger.exception("Error cancelling biometric scan")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route("/api/biometric/delete", methods=["POST"])
 def biometric_delete():
@@ -5013,8 +5029,30 @@ def disso_temp_live():
             data = disso_temp_hardware.query_live_temp_now()
         else:
             data = disso_temp_hardware.get_live()
-        return jsonify({"ok": True, "data": data}), 200
+        return jsonify({"ok": True, "data": data, "armed": disso_temp_hardware.is_auto_temp_armed()}), 200
     except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/hardware/disso/temperature/auto", methods=["POST"])
+def disso_temp_auto():
+    """Arm or disarm UART-2 #TEMP-A-1SEC* streaming."""
+    gate = _require_auth()
+    if gate:
+        return gate
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        armed = body.get("armed")
+        if armed is None:
+            armed = body.get("enable")
+        reason = str(body.get("reason") or "")
+        if armed in (True, 1, "1", "true", "yes", "on", "arm"):
+            result = disso_temp_hardware.arm_auto_temp(reason=reason or "api")
+        else:
+            result = disso_temp_hardware.disarm_auto_temp(reason=reason or "api")
+        return jsonify(result), 200
+    except Exception as e:
+        app.logger.exception("disso temp auto")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
@@ -5026,7 +5064,7 @@ def disso_status_live():
             data = disso_temp_hardware.query_live_status_now()
         else:
             data = disso_temp_hardware.get_live()
-        return jsonify({"ok": True, "data": data}), 200
+        return jsonify({"ok": True, "data": data, "armed": disso_temp_hardware.is_auto_temp_armed()}), 200
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

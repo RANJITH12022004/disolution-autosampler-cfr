@@ -489,6 +489,13 @@ def _simulate_handle_tx(frame: str) -> str:
         with _sim_lock:
             _sim["paused"] = True
         return "PAUSE-TEST,ACK"
+    if upper == "RESUME-TEST":
+        with _sim_lock:
+            _sim["paused"] = False
+            _sim["running"] = True
+            if _sim["step_rem_sec"] <= 0:
+                _sim["step_rem_sec"] = max(1, int(_sim.get("step_set_sec") or 5))
+        return "RESUME-TEST,ACK"
     if upper == "STOP-TEST":
         with _sim_lock:
             _sim["running"] = False
@@ -816,9 +823,96 @@ def stop_heater() -> Dict[str, Any]:
     return res
 
 
-def start_test() -> Dict[str, Any]:
+def _wait_for_lift_home(timeout: float = 120.0) -> Dict[str, Any]:
+    """Wait for async #LF-CL-HOME,ACK* (shaft / stirrer reached home / down)."""
+    def _is_home(inner: str) -> bool:
+        upper = (inner or "").upper()
+        return "LF-CL-HOME" in upper or "LF-CU-HOME" in upper
+
+    already = _take_deferred(_is_home)
+    if already:
+        return {"ok": True, "home": True, "ack": already}
+
+    deadline = time.time() + max(5.0, float(timeout or 120.0))
+    while time.time() < deadline:
+        inner = _pop_next_ack(timeout=0.5)
+        if not inner:
+            continue
+        upper = (inner or "").upper()
+        if _is_home(inner):
+            return {"ok": True, "home": True, "ack": inner}
+        if proto.is_error_response(inner) and ("LF" in upper or "LIFT" in upper or "HOME" in upper):
+            return {"ok": False, "error": inner, "ack": inner, "home": False}
+        if _is_async_completion(inner):
+            _defer_ack(inner)
+    return {
+        "ok": False,
+        "home": False,
+        "error": "Shaft home timeout — shaft did not reach home position",
+        "errorCode": "lift_position",
+    }
+
+
+def ensure_shaft_home(timeout: float = 120.0) -> Dict[str, Any]:
+    """
+    Production Start prep: #LF-CU-DOWN* then wait for #LF-CL-HOME,ACK*.
+
+    DOWN ACK means motion started; home is only confirmed by LF-CL-HOME.
+    """
+    _drain_pending(0.1)
+    # Drop a stale home latch so we wait for this DOWN move's completion.
+    _take_deferred(lambda s: "LF-CL-HOME" in (s or "").upper() or "LF-CU-HOME" in (s or "").upper())
+
+    down = _tx(proto.build_lift("down"), timeout=5.0, expect_prefix="LF-CU-DOWN")
+    if not down.get("ok"):
+        err = str(down.get("error") or down.get("ack") or "LF-CU-DOWN failed")
+        out = {
+            "ok": False,
+            "error": err,
+            "down": down,
+            "phase": "shaft_down",
+        }
+        if proto.is_lift_position_error(err):
+            out["errorCode"] = "lift_position"
+        return out
+
+    home = _wait_for_lift_home(timeout=timeout)
+    if not home.get("ok"):
+        return {
+            "ok": False,
+            "error": home.get("error") or "Shaft did not reach home",
+            "errorCode": home.get("errorCode") or "lift_position",
+            "down": down,
+            "home": home,
+            "phase": "shaft_home",
+        }
+    return {
+        "ok": True,
+        "down": down,
+        "home": home,
+        "ack": home.get("ack"),
+        "phase": "shaft_home",
+    }
+
+
+def start_test(*, ensure_shaft_home_first: bool = True, home_timeout: float = 120.0) -> Dict[str, Any]:
+    """
+    Start dissolution test on ESP.
+
+    Production sequence:
+      1) #LF-CU-DOWN* → wait #LF-CL-HOME,ACK* (shaft at home)
+      2) #START-TEST* → wait #START-TEST,ACK*
+    """
+    shaft: Optional[Dict[str, Any]] = None
+    if ensure_shaft_home_first:
+        shaft = ensure_shaft_home(timeout=home_timeout)
+        if not shaft.get("ok"):
+            return shaft
+
     _drain_pending(0.1)
     res = _tx(proto.build_start_test(), timeout=5.0, expect_prefix="START-TEST")
+    if shaft is not None:
+        res["shaft"] = shaft
     if not res.get("ok"):
         err = str(res.get("error") or res.get("ack") or "")
         if proto.is_lift_position_error(err):
@@ -835,6 +929,16 @@ def pause_test() -> Dict[str, Any]:
     if res.get("ok"):
         with _sim_lock:
             _sim["paused"] = True
+    return res
+
+
+def resume_test() -> Dict[str, Any]:
+    """Send #RESUME-TEST* after a pause (not power-loss re-upload)."""
+    res = _tx(proto.build_resume_test(), timeout=5.0, expect_prefix="RESUME-TEST")
+    if res.get("ok"):
+        with _sim_lock:
+            _sim["paused"] = False
+            _sim["running"] = True
     return res
 
 

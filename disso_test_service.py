@@ -210,11 +210,30 @@ def _heartbeat_loop():
             with _lock:
                 active = _run.get("active")
                 status = _run.get("runStatus")
+                if active and status == "RUNNING":
+                    # Pi-side step countdown. UART-2 often stays IDLE and does not
+                    # stream remainingTime — without this the UI timer/progress freeze.
+                    rem = int(_run.get("remainingSecInStep") or 0)
+                    if rem > 0:
+                        rem -= 1
+                        _run["remainingSecInStep"] = rem
+                        _run["elapsedSec"] = int(_run.get("elapsedSec") or 0) + 1
+                        if rem == 0:
+                            steps = _run.get("remainingStepsPayload")
+                            if not isinstance(steps, list) or not steps:
+                                steps = proto.normalize_steps(_run.get("recipe") or {})
+                            idx = int(_run.get("stepIndex") or 0)
+                            if idx + 1 < len(steps):
+                                nxt = steps[idx + 1]
+                                dur = max(0, int(nxt.get("durationSeconds") or 0))
+                                _run["stepIndex"] = idx + 1
+                                _run["remainingSecInStep"] = dur
+                                _run["setSecInStep"] = dur
+                if active and status in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING"):
+                    _run["lastHeartbeatRtc"] = _now_iso()
             if active and status in ("RUNNING", "PAUSED"):
                 _append_temp_log_sample()
             if active and status in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING"):
-                with _lock:
-                    _run["lastHeartbeatRtc"] = _now_iso()
                 _persist()
         except Exception:
             if _logger:
@@ -228,9 +247,10 @@ def _on_status(status: Dict[str, Any]):
     with _lock:
         if not _run.get("active"):
             return
-        if status.get("state") == "TEST-RUNNING":
+        state = str(status.get("state") or "").upper()
+        if state in ("TEST-RUNNING", "TEST_RUNNING"):
             if status.get("stepCurrent") is not None:
-                rem_base = int(_run.get("resumeFromStepIndex") or _run.get("stepIndex") or 0)
+                rem_base = int(_run.get("resumeFromStepIndex") or 0)
                 cur = int(status["stepCurrent"]) - 1
                 new_idx = rem_base + max(0, cur)
                 if new_idx != _run.get("stepIndex"):
@@ -238,17 +258,26 @@ def _on_status(status: Dict[str, Any]):
                 _run["stepIndex"] = new_idx
             if status.get("remainingTime"):
                 rem = proto.hms_to_seconds(status.get("remainingTime"))
-                if rem != _run.get("remainingSecInStep"):
+                if rem is not None and rem != _run.get("remainingSecInStep"):
                     changed = True
-                _run["remainingSecInStep"] = rem
+                    _run["remainingSecInStep"] = rem
             if status.get("setTime"):
-                _run["setSecInStep"] = proto.hms_to_seconds(status.get("setTime"))
+                set_s = proto.hms_to_seconds(status.get("setTime"))
+                if set_s is not None:
+                    _run["setSecInStep"] = set_s
             if _run.get("runStatus") not in ("PAUSED", "ABORTED", "COMPLETE"):
                 if _run.get("runStatus") != "RUNNING":
                     changed = True
                 _run["runStatus"] = "RUNNING"
+                _run["paused"] = False
             _run["espStatus"] = status
             _run["lastHeartbeatRtc"] = _now_iso()
+        elif state == "PAUSED":
+            if _run.get("runStatus") == "RUNNING":
+                _run["runStatus"] = "PAUSED"
+                _run["paused"] = True
+                changed = True
+            _run["espStatus"] = status
     if changed:
         _persist()
 
@@ -286,13 +315,15 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
     }
 
     # Recipe frames (SET-TEMP → TS → RPM → DUR → SML → FL → AUTO-DROP) are uploaded on Load.
-    # Start only sends #START-TEST*.
+    # Start: shaft DOWN → wait LF-CL-HOME → #START-TEST* (timer / run state begin only after ACK).
     start_res = cmd_hw.start_test()
     if not start_res.get("ok"):
         err = start_res.get("error") or "ESP START-TEST failed"
         out = {"ok": False, "error": err, "start": start_res}
         if start_res.get("errorCode"):
             out["errorCode"] = start_res.get("errorCode")
+        if start_res.get("phase"):
+            out["phase"] = start_res.get("phase")
         return out
 
     with _lock:
@@ -355,22 +386,39 @@ def pause(user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 
 def resume_esp(user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Resume after PAUSE (not power-loss). Re-issues START-TEST if firmware needs it."""
+    """
+    Resume after PAUSE → #RESUME-TEST* (firmware pause/resume).
+    Power-loss pending → re-upload remaining steps then #START-TEST*.
+    """
     with _lock:
         if not _run.get("active") or _run.get("runStatus") not in ("PAUSED", "POWER_RESUME_PENDING"):
             return {"ok": False, "error": "No paused test to resume"}
+        status = str(_run.get("runStatus") or "")
         recipe = copy.deepcopy(_run.get("recipe") or {})
         step_index = int(_run.get("stepIndex") or 0)
         rem = _run.get("remainingSecInStep")
-    upload = cmd_hw.upload_recipe(recipe, from_step_index=step_index, remaining_sec_in_step=rem)
-    if not upload.get("ok"):
-        return {"ok": False, "error": upload.get("error") or "re-upload failed", "upload": upload}
-    start_res = cmd_hw.start_test()
-    if not start_res.get("ok"):
-        out = {"ok": False, "error": start_res.get("error") or "START-TEST failed", "start": start_res}
-        if start_res.get("errorCode"):
-            out["errorCode"] = start_res.get("errorCode")
-        return out
+
+    if status == "POWER_RESUME_PENDING":
+        upload = cmd_hw.upload_recipe(recipe, from_step_index=step_index, remaining_sec_in_step=rem)
+        if not upload.get("ok"):
+            return {"ok": False, "error": upload.get("error") or "re-upload failed", "upload": upload}
+        start_res = cmd_hw.start_test()
+        if not start_res.get("ok"):
+            out = {"ok": False, "error": start_res.get("error") or "START-TEST failed", "start": start_res}
+            if start_res.get("errorCode"):
+                out["errorCode"] = start_res.get("errorCode")
+            if start_res.get("phase"):
+                out["phase"] = start_res.get("phase")
+            return out
+    else:
+        # Normal pause → resume (do not re-home shaft or re-upload recipe)
+        start_res = cmd_hw.resume_test()
+        if not start_res.get("ok"):
+            out = {"ok": False, "error": start_res.get("error") or "RESUME-TEST failed", "start": start_res}
+            if start_res.get("errorCode"):
+                out["errorCode"] = start_res.get("errorCode")
+            return out
+
     with _lock:
         _run["runStatus"] = "RUNNING"
         _run["paused"] = False
@@ -378,7 +426,7 @@ def resume_esp(user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if user:
             _run.setdefault("operators", []).append(_operator_entry(user, "continue"))
     _persist()
-    _audit("Test resumed", "")
+    _audit("Test resumed", "RESUME-TEST" if status == "PAUSED" else "power-resume START-TEST")
     return {"ok": True, "state": get_state()}
 
 

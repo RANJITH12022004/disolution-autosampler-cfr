@@ -204,6 +204,7 @@
       if (!res.ok || !(res.body && res.body.ok)) {
         var err = new Error((res.body && res.body.error) || 'Failed to start Dissolution test on ESP');
         err.errorCode = res.body && res.body.errorCode;
+        err.phase = res.body && res.body.phase;
         err.body = res.body;
         throw err;
       }
@@ -227,6 +228,20 @@
   function applyStateToUi(st) {
     if (!st) return;
     window._dissoServerState = st;
+    window._dissoServerRunActive = !!(st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING'));
+    var dt = window._dissolutionTest;
+    if (dt) {
+      if (st.stepIndex != null) dt.stepIndex = st.stepIndex;
+      if (st.remainingSecInStep != null) dt.remainingSec = st.remainingSecInStep;
+      if (st.setSecInStep != null) dt.setSec = st.setSecInStep;
+      if (st.runStatus === 'RUNNING') {
+        dt.running = true;
+        dt.paused = false;
+      } else if (st.runStatus === 'PAUSED') {
+        dt.running = true;
+        dt.paused = true;
+      }
+    }
     if (typeof _dtSetText === 'function') {
       if (st.stepCount != null) {
         var stepLabel = ((st.stepIndex || 0) + 1) + ' / ' + st.stepCount;
@@ -237,16 +252,11 @@
         var remHms = (typeof formatHms === 'function')
           ? formatHms(st.remainingSecInStep)
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.remainingSecInStep) : String(st.remainingSecInStep) + 's');
-        if (window._dissolutionTest) {
-          window._dissolutionTest.remainingSec = st.remainingSecInStep;
-        }
         // Left Step Timer only — live remaining for current step.
         _dtSetText('dt-hero-timer', remHms);
       }
       if (st.setSecInStep != null) {
-        if (window._dissolutionTest) {
-          window._dissolutionTest.setSec = st.setSecInStep;
-        }
+        // keep setSec already synced on dt above
       }
       // Total Duration + Step Duration tiles from local recipe / step set length.
       if (typeof _dtRefreshDurationTiles === 'function') {
@@ -258,9 +268,16 @@
         _dtSetText('dt-step-duration', setHms);
       }
       if (st.runStatus) {
-        var label = st.runStatus;
-        if (typeof _dtSetStatus === 'function') _dtSetStatus(label, String(label).toLowerCase());
+        var rs = String(st.runStatus).toLowerCase();
+        if (typeof _dtSetStatus === 'function') {
+          if (rs === 'running') _dtSetStatus('Test running… Step ' + ((st.stepIndex || 0) + 1) + '/' + (st.stepCount || '?'), 'running');
+          else if (rs === 'paused') _dtSetStatus('Test paused', 'paused');
+          else _dtSetStatus(st.runStatus, rs);
+        }
       }
+    }
+    if (typeof _dtUpdateProgress === 'function') {
+      _dtUpdateProgress();
     }
     var temps = st.temps || {};
     applyLiveTempsToUi(temps);
@@ -356,10 +373,10 @@
     stopStatePolling();
     fetchStateNow();
     armAutoTemp('test-state');
-    // Pull server state every 2s while a test is live (UART-2 temps via auto stream + UI poll).
+    // Pull server state every 1s while a test is live (step timer + progress).
     _pollTimer = setInterval(function () {
       fetchStateNow();
-    }, 2000);
+    }, 1000);
   }
 
   function stopStatePolling() {

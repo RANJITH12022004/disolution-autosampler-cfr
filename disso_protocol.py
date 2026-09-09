@@ -372,6 +372,10 @@ def build_pause_test() -> str:
     return wrap("PAUSE-TEST")
 
 
+def build_resume_test() -> str:
+    return wrap("RESUME-TEST")
+
+
 def build_stop_test() -> str:
     return wrap("STOP-TEST")
 

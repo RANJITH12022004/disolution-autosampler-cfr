@@ -684,10 +684,10 @@ function friendlyBiometricError(errOrMsg, fallback) {
 window.friendlyBiometricError = friendlyBiometricError;
 
 function isDissolutionTestActive() {
-    // Lock navigation only after Start (running / paused).
+    // Lock navigation after Start (preparing shaft / running / paused).
     // Preheat and "recipe loaded but not started" must allow free navigation.
     var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
-    if (dt && (dt.running || dt.paused)) return true;
+    if (dt && (dt.running || dt.paused || dt.preparingStart)) return true;
     try {
         if (window._dissoServerRunActive === true) return true;
     } catch (e) { /* ignore */ }
@@ -12620,6 +12620,7 @@ function _dtSetStatus(message, state) {
         var label = 'Ready';
         if (state === 'running') label = 'Running';
         else if (state === 'paused') label = 'Paused';
+        else if (state === 'preparing') label = 'Preparing';
         else if (state === 'done') label = 'Completed';
         else if (state === 'aborted') label = 'Aborted';
         runState.textContent = label;
@@ -12848,6 +12849,7 @@ function initDissolutionTestRun(recipe) {
         preheatTimerId: null,
         heaterForcedOn: false,
         recipeUploaded: false,
+        preparingStart: false,
         liftPositionBlocked: false,
         tempLog: [],
         shaftUpDisabled: false,
@@ -13041,6 +13043,8 @@ var _dtShaftUpTimerId = null;
 var _shaftCmdSeq = 0;
 var _shaftMotion = 'stop'; // stop | raising | lowering | home
 var _shaftEventsArmed = false;
+/** When true, LF-CL-HOME may send LF-CU-STOP (manual Down only — never during Start prepare). */
+var _shaftStopOnHome = false;
 
 function _dtClearShaftTimers() {
     if (_dtShaftUpTimerId != null) {
@@ -13090,7 +13094,7 @@ function _shaftSetActiveAll(cmd) {
 
 function _shaftApplyDisabledFlags() {
     var dt = _dissolutionTest;
-    var testLocked = !!(dt && (dt.running || dt.paused || dt.preheating));
+    var testLocked = !!(dt && (dt.running || dt.paused || dt.preheating || dt.preparingStart));
     var upDisabled = !!(dt && dt.shaftUpDisabled) || !!(_rpmValShaftState && _rpmValShaftState.upDisabled);
     var downDisabled = !!(dt && dt.shaftDownDisabled) || !!(_rpmValShaftState && _rpmValShaftState.downDisabled);
     // At home: Down latched until operator raises or stops mid-travel after re-enable via Stop/Up.
@@ -13181,8 +13185,14 @@ function applyShaftHomeFromEsp() {
     _shaftSetStatusAll('Down (home)');
     _shaftSetActiveAll('stop');
     _shaftApplyDisabledFlags();
-    // Safety: if still moving, request stop (ignore result).
-    if (typeof window.dissoLift === 'function') {
+    // Auto-STOP only after operator Down. Start prepare / active run owns sequencing —
+    // never inject LF-CU-STOP around START-TEST.
+    var shouldStop = !!_shaftStopOnHome;
+    _shaftStopOnHome = false;
+    if (dt && (dt.preparingStart || dt.running || dt.paused)) {
+        shouldStop = false;
+    }
+    if (shouldStop && typeof window.dissoLift === 'function') {
         window.dissoLift('stop').catch(function () {});
     }
 }
@@ -13219,6 +13229,7 @@ function shaftUnitCommand(cmd, opts) {
     if (cmd === 'stop') {
         _dtClearShaftTimers();
         _shaftMotion = 'stop';
+        _shaftStopOnHome = false;
         if (dt) {
             dt.shaftUpDisabled = false;
             dt.shaftDownDisabled = false;
@@ -13233,6 +13244,7 @@ function shaftUnitCommand(cmd, opts) {
         _shaftApplyDisabledFlags();
     } else if (cmd === 'up') {
         _shaftMotion = 'raising';
+        _shaftStopOnHome = false;
         if (dt) dt.shaftDownDisabled = false;
         if (_rpmValShaftState) _rpmValShaftState.downDisabled = false;
         _shaftSetStatusAll('Raising');
@@ -13240,6 +13252,7 @@ function shaftUnitCommand(cmd, opts) {
         _shaftApplyDisabledFlags();
     } else {
         _shaftMotion = 'lowering';
+        _shaftStopOnHome = true; // manual Down → STOP after LF-CL-HOME
         _shaftSetStatusAll('Lowering');
         _shaftSetActiveAll('down');
         _shaftApplyDisabledFlags();
@@ -13324,89 +13337,179 @@ function dissolutionTestStart() {
     if (!dt || !dt.steps.length) { showAppModal('No recipe steps available.', 'Test'); return; }
     if (dt.needsPreheat && !dt.preheatDone) { showAppModal('Complete Preheat before starting the test.', 'Preheat'); return; }
     if (dt.preheating) { showAppModal('Preheat is still in progress.', 'Preheat'); return; }
+    if (dt.preparingStart) return;
     if (dt.running && !dt.paused) return;
     if (!dt.paused && dt.recipeUploaded === false) {
         showAppModal('Recipe is still preparing. Please wait a moment, then try again.', 'Test');
         return;
     }
 
-    // Server-authoritative ESP path
+    function _beginPreparingUi() {
+        dt.preparingStart = true;
+        // Timer must not run until START-TEST succeeds after shaft home.
+        _dtStopTimer();
+        var startBtn = _dtEl('dt-start-btn');
+        if (startBtn) startBtn.disabled = true;
+        _dtSetStatus('Preparing… moving shaft to home', 'preparing');
+        _dtSyncStirrerLock();
+        if (typeof showLoadingOverlay === 'function') {
+            showLoadingOverlay('Preparing', 'Moving shaft to home position…', { cancellable: false });
+        }
+        if (typeof window.dissoStartCmdEventsPolling === 'function') {
+            window.dissoStartCmdEventsPolling();
+        }
+    }
+
+    function _endPreparingUi(ok) {
+        dt.preparingStart = false;
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        var startBtn = _dtEl('dt-start-btn');
+        if (!ok && startBtn) startBtn.disabled = false;
+        _dtSyncStirrerLock();
+    }
+
+    function _onStartSucceeded() {
+        dt.running = true;
+        dt.paused = false;
+        dt.liftPositionBlocked = false;
+        dt.preparingStart = false;
+        if (!dt.testStartTime && typeof getDisplayedKioskDateTimeIso === 'function') {
+            dt.testStartTime = getDisplayedKioskDateTimeIso();
+        }
+        if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        _dtSetControlsRunning();
+        _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
+        logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' started', { eventType: 'lifecycle' });
+        if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
+        if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+        _dtUpdateProgress();
+        _dtSyncStirrerLock();
+    }
+
+    function _onResumeSucceeded() {
+        dt.running = true;
+        dt.paused = false;
+        dt.preparingStart = false;
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        _dtSetControlsRunning();
+        _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
+        logAuditEvent('Resumed dissolution test', (dt.recipe.productName || 'Recipe') + ' resumed', { eventType: 'lifecycle' });
+        if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
+        if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+        _dtUpdateProgress();
+        _dtSyncStirrerLock();
+    }
+
+    function _onStartFailed(err) {
+        _endPreparingUi(false);
+        var msg = friendlyHardwareError(err, 'Could not start test. Try again.');
+        var code = err && err.errorCode;
+        var phase = err && err.phase;
+        if (code === 'lift_position' || phase === 'shaft_down' || phase === 'shaft_home' ||
+            /lift|column|position|shaft|home/i.test(String((err && err.message) || ''))) {
+            dt.running = false;
+            dt.paused = false;
+            dt.liftPositionBlocked = true;
+            _dtSetControlsIdle();
+            msg = 'Shaft did not reach home position. Check the lifting column, then press Start again.';
+        }
+        _dtSetStatus('Press Start when ready.', 'ready');
+        showAppModal(msg, 'Test');
+    }
+
+    // Resume after pause → #RESUME-TEST* (no shaft re-home)
     if (typeof window.dissoResumeTest === 'function' && dt.paused) {
+        var resumeBtn = _dtEl('dt-start-btn');
+        if (resumeBtn) resumeBtn.disabled = true;
+        dt.preparingStart = false;
+        _dtSetStatus('Resuming…', 'preparing');
+        if (typeof showLoadingOverlay === 'function') {
+            showLoadingOverlay('Resuming', 'Resuming test…', { cancellable: false });
+        }
         window.dissoResumeTest().then(function (res) {
             if (!res.ok || !(res.body && res.body.ok)) {
-                var msg = friendlyHardwareError((res.body && res.body.error) || '', 'Could not resume test. Try again.');
-                if ((res.body && res.body.errorCode) === 'lift_position' || /lift|column|position/i.test(String((res.body && res.body.error) || ''))) {
-                    dt.liftPositionBlocked = true;
-                    _dtSetControlsIdle();
-                    msg = 'Lifting column is not in position. Move the lifting column Down using Shaft Position, then press Start again.';
-                }
-                showAppModal(msg, 'Test');
+                if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+                if (resumeBtn) resumeBtn.disabled = false;
+                _dtSetControlsPaused();
+                _dtSetStatus('Test paused', 'paused');
+                var failMsg = friendlyHardwareError((res.body && res.body.error) || '', 'Could not resume test. Try again.');
+                showAppModal(failMsg, 'Test');
                 return;
             }
-            dt.paused = false;
-            dt.running = true;
-            dt.liftPositionBlocked = false;
-            _dtSetControlsRunning();
-            _dtSetStatus('Test running…', 'running');
-            if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
+            _onResumeSucceeded();
+        }).catch(function (err) {
+            if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+            if (resumeBtn) resumeBtn.disabled = false;
+            _dtSetControlsPaused();
+            _dtSetStatus('Test paused', 'paused');
+            showAppModal(friendlyHardwareError(err, 'Could not resume test. Try again.'), 'Test');
         });
         return;
     }
     if (typeof window.dissoStartTest === 'function' && !dt.paused) {
-        var startBtn = _dtEl('dt-start-btn');
-        if (startBtn) startBtn.disabled = true;
+        _beginPreparingUi();
         window.dissoStartTest(dt.recipe, {
             arNumber: dt.recipe.arNumber,
             batchNumber: dt.recipe.batchNumber,
             powerFailure: dt.recipe.powerFailure
         }).then(function () {
-            dt.running = true;
-            dt.paused = false;
-            dt.liftPositionBlocked = false;
-            if (!dt.testStartTime && typeof getDisplayedKioskDateTimeIso === 'function') {
-                dt.testStartTime = getDisplayedKioskDateTimeIso();
-            }
-            if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
-            _dtSetControlsRunning();
-            _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-            logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' started', { eventType: 'lifecycle' });
-            if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
+            _onStartSucceeded();
         }).catch(function (err) {
-            if (startBtn) startBtn.disabled = false;
-            var msg = friendlyHardwareError(err, 'Could not start test. Try again.');
-            var code = err && err.errorCode;
-            if (code === 'lift_position' || /lift|column|position/i.test(String((err && err.message) || ''))) {
-                dt.running = false;
-                dt.paused = false;
-                dt.liftPositionBlocked = true;
-                _dtSetControlsIdle();
-                msg = 'Lifting column is not in position. Move the lifting column Down using Shaft Position controls, then press Start again.';
-            }
-            showAppModal(msg, 'Test');
+            _onStartFailed(err || {});
         });
         return;
     }
 
-    // Legacy local timer fallback
-    if (dt.paused) {
-        dt.paused = false;
+    // Legacy local timer fallback (no ESP): still lower shaft if possible, then start timer.
+    _beginPreparingUi();
+    var afterHome = function () {
+        _endPreparingUi(true);
+        if (dt.paused) {
+            dt.paused = false;
+            dt.running = true;
+            _dtSetControlsRunning();
+            _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
+            _dtStartTicker();
+            return;
+        }
         dt.running = true;
+        dt.paused = false;
+        if (!dt.testStartTime && typeof getDisplayedKioskDateTimeIso === 'function') {
+            dt.testStartTime = getDisplayedKioskDateTimeIso();
+        }
+        if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
+        if (dt.remainingSec <= 0) _dtApplyStep(dt.stepIndex, true);
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
+        logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' step ' + (dt.stepIndex + 1), { eventType: 'lifecycle' });
         _dtStartTicker();
+    };
+    if (typeof window.dissoLift === 'function' && _shaftMotion !== 'home') {
+        window.dissoLift('down').then(function (res) {
+            if (!res || res.ok === false) {
+                _onStartFailed({ message: (res && res.error) || 'Shaft down failed', errorCode: 'lift_position', phase: 'shaft_down' });
+                return;
+            }
+            var deadline = Date.now() + 120000;
+            var poll = function () {
+                if (_shaftMotion === 'home') {
+                    afterHome();
+                    return;
+                }
+                if (Date.now() > deadline) {
+                    _onStartFailed({ message: 'Shaft home timeout', errorCode: 'lift_position', phase: 'shaft_home' });
+                    return;
+                }
+                setTimeout(poll, 400);
+            };
+            poll();
+        }).catch(function (err) {
+            _onStartFailed(err || { message: 'Shaft down failed', errorCode: 'lift_position', phase: 'shaft_down' });
+        });
         return;
     }
-    dt.running = true;
-    dt.paused = false;
-    if (!dt.testStartTime && typeof getDisplayedKioskDateTimeIso === 'function') {
-        dt.testStartTime = getDisplayedKioskDateTimeIso();
-    }
-    if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
-    if (dt.remainingSec <= 0) _dtApplyStep(dt.stepIndex, true);
-    _dtSetControlsRunning();
-    _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-    logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' step ' + (dt.stepIndex + 1), { eventType: 'lifecycle' });
-    _dtStartTicker();
+    afterHome();
 }
 
 function dissolutionTestPause() {
@@ -13647,6 +13750,8 @@ function _dtPerformAbort(opts) {
     var live = _dissolutionTest;
     if (!live || live._aborting) return Promise.resolve(null);
     live._aborting = true;
+    live.preparingStart = false;
+    if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
     _dtStopTimer();
     _dtStopPreheatTimer();
     live.running = false;

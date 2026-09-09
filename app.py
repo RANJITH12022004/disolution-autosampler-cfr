@@ -896,19 +896,69 @@ def _require_user_manage_or_self(member_id: int):
 
 
 def _self_profile_payload_from_request(existing: dict, payload: dict) -> dict:
-    """Self-service profile: only display name and password may change."""
+    """Self-service profile PUT: name and password are not editable here.
+
+    Password changes must use POST /api/data/auth/change-password (current + new).
+    Full name is immutable after create.
+    """
     out = dict(existing)
     if "name" in payload:
         name = str(payload.get("name") or "").strip()
-        if name:
-            out["name"] = name
-    new_pwd = payload.get("password")
-    if new_pwd is not None and str(new_pwd).strip():
-        pwd_err = _password_strength_error(str(new_pwd))
-        if pwd_err:
-            raise ValueError(pwd_err)
-        out["password"] = str(new_pwd)
+        existing_name = str(existing.get("name") or "").strip()
+        if name and name != existing_name:
+            raise ValueError("Full name cannot be changed after the profile is created.")
+    if payload.get("password") is not None and str(payload.get("password") or "").strip():
+        raise ValueError("Use Change Password (current password required) to update your password.")
     return out
+
+
+@app.route("/api/data/auth/change-password", methods=["POST"])
+def change_password():
+    """Logged-in user changes password with current + new (profile Edit Password)."""
+    try:
+        gate = _require_auth()
+        if gate:
+            return gate
+        payload = request.get_json(force=True, silent=True) or {}
+        old_password = str(payload.get("oldPassword") or "")
+        new_password = str(payload.get("newPassword") or "")
+        if not old_password or not new_password:
+            return jsonify({"ok": False, "error": "oldPassword and newPassword are required"}), 400
+        member, cur = _resolve_session_member_record()
+        if not member:
+            return jsonify({"ok": False, "error": "Factory account cannot change password here."}), 403
+        username = str(member.get("username") or (cur or {}).get("username") or "").strip()
+        if not username:
+            return jsonify({"ok": False, "error": "Not logged in"}), 401
+        auth_user = data_service.authenticate_user(username, old_password)
+        if not auth_user:
+            return jsonify({"ok": False, "error": "Current password is incorrect"}), 401
+        pwd_err = _password_strength_error(new_password)
+        if pwd_err:
+            return jsonify({"ok": False, "error": pwd_err}), 400
+        if old_password == new_password:
+            return jsonify({"ok": False, "error": "New password must be different from your current password."}), 400
+        mid = int(member.get("id"))
+        updated_member = data_service.set_member_password(mid, new_password)
+        data_service.clear_mandatory_password_reset_flags(mid)
+        updated_member = data_service.get_member(mid) or updated_member
+        data_service.refresh_current_user_from_member()
+        safe_member = data_service.sanitize_member_for_client(updated_member) or dict(updated_member)
+        _audit_event(
+            action="Password changed",
+            outcome="success",
+            entity_type="member",
+            entity_id=updated_member.get("id"),
+            entity_name=updated_member.get("username") or updated_member.get("name") or "",
+            details="Password changed from profile",
+            target_user=updated_member.get("username") or "",
+        )
+        return jsonify({"ok": True, "member": safe_member}), 200
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        app.logger.exception("Error changing password")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 def _resolve_session_member_record():
@@ -1858,6 +1908,13 @@ def update_member(member_id):
         if not before_member:
             return jsonify({"error": "Member not found"}), 404
         is_self = _is_self_member(member_id)
+        # Full name is immutable after create (self or admin).
+        if "name" in member_data:
+            incoming_name = str(member_data.get("name") or "").strip()
+            existing_name = str(before_member.get("name") or "").strip()
+            if incoming_name and incoming_name != existing_name:
+                return jsonify({"error": "Full name cannot be changed after the profile is created."}), 400
+        member_data["name"] = before_member.get("name")
         if is_self:
             try:
                 member_data = _self_profile_payload_from_request(before_member, member_data)
@@ -1868,11 +1925,22 @@ def update_member(member_id):
         if not is_self and data_service.has_non_empty_feature_overrides(member_data) and not _can_assign_feature_overrides():
             return jsonify({"error": "Forbidden. You do not have permission to assign permission cards."}), 403
         member_data["id"] = member_id
+        # Empty password means "keep current" — never wipe credentials by accident.
+        if "password" in member_data and not str(member_data.get("password") or "").strip():
+            member_data.pop("password", None)
         cur = data_service.get_current_user() or {}
         acting_id = cur.get("id")
         old_password = str((before_member or {}).get("password") or "")
         new_password = str(member_data.get("password") or "")
         password_changed = "password" in member_data and new_password not in ("", old_password)
+        if password_changed:
+            if is_self:
+                return jsonify({
+                    "error": "Use Change Password (current password required) to update your password.",
+                }), 400
+            pwd_err = _password_strength_error(new_password)
+            if pwd_err:
+                return jsonify({"error": pwd_err}), 400
         data_service.save_member(member_data, acting_user_id=acting_id)
         updated = data_service.get_member(member_id) or dict(member_data)
         sig = {
@@ -1888,7 +1956,7 @@ def update_member(member_id):
                 entity_type="member",
                 entity_id=member_id,
                 entity_name=uname,
-                details="Password changed for user: {}".format(uname),
+                details="Password reset by admin for user: {}".format(uname),
                 target_user=uname,
                 signature=sig,
             )
@@ -3009,7 +3077,7 @@ def get_own_profile():
 
 @app.route("/api/data/auth/profile", methods=["PUT"])
 def update_own_profile():
-    """Any logged-in member may change their own display name and password."""
+    """Own profile PUT: name/password rejected — use change-password for password."""
     try:
         err = _require_auth()
         if err:
@@ -3020,52 +3088,18 @@ def update_own_profile():
             if cur and str((cur.get("username") or "")).strip().upper() == data_service.FACTORY_USERNAME.upper():
                 return jsonify({"error": "Factory profile is managed locally on this device."}), 400
             return jsonify({"error": "Member not found"}), 404
-        member_id = int(member.get("id"))
-        before_member = dict(member)
-        try:
-            member_data = _self_profile_payload_from_request(before_member, payload)
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
         name_in = "name" in payload and str(payload.get("name") or "").strip()
         pwd_in = "password" in payload and str(payload.get("password") or "").strip()
+        if name_in:
+            existing_name = str(member.get("name") or "").strip()
+            if str(payload.get("name") or "").strip() != existing_name:
+                return jsonify({"error": "Full name cannot be changed after the profile is created."}), 400
+        if pwd_in:
+            return jsonify({"error": "Use Change Password (current password required) to update your password."}), 400
         if not name_in and not pwd_in:
-            return jsonify({"error": "Provide a name and/or new password to save."}), 400
-        acting_id = _session_member_id()
-        password_changed = pwd_in
-        data_service.save_member(member_data, acting_user_id=acting_id)
-        updated = data_service.get_member(member_id) or member_data
-        data_service.refresh_current_user_from_member()
-        cur_after = data_service.get_current_user() or {}
-        sig = {
-            "mode": "self",
-            "username": (cur_after.get("username") or cur_after.get("name") or "").strip() or "--",
-            "role": (cur_after.get("role") or "").strip() or "--",
-        }
-        uname = updated.get("username") or updated.get("name") or ""
-        if password_changed:
-            _audit_event(
-                action="Password changed",
-                outcome="success",
-                entity_type="member",
-                entity_id=member_id,
-                entity_name=uname,
-                details="Password changed (self) for user: {}".format(uname),
-                target_user=uname,
-                signature=sig,
-            )
-        _audit_event(
-            action="Profile updated",
-            outcome="success",
-            entity_type="member",
-            entity_id=member_id,
-            entity_name=uname,
-            details="Profile updated (self)",
-            target_user=uname,
-            before=data_service.sanitize_member_for_client(before_member),
-            after=data_service.sanitize_member_for_client(updated) or updated,
-            signature=sig,
-        )
-        safe = data_service.sanitize_member_for_client(updated) or dict(updated)
+            return jsonify({"error": "No profile fields to update. Use Edit Password to change your password."}), 400
+        # Name matches existing (no-op) — return current member.
+        safe = data_service.sanitize_member_for_client(member) or dict(member)
         return jsonify({"ok": True, "member": safe}), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -4309,7 +4343,7 @@ def print_status():
 @app.route("/api/hardware/stream", methods=["GET"])
 def hardware_stream():
     gate = _require_any_session_internal(
-        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
+        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle", "heater-control", "shaft-control"],
         "Forbidden. You do not have permission to use hardware controls.",
     )
     if gate:
@@ -4324,7 +4358,7 @@ def hardware_log_read():
     Query: channel=1|cmd (UART-1 command) or channel=2|temp (UART-2 temperature).
     """
     gate = _require_any_session_internal(
-        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
+        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle", "heater-control", "shaft-control"],
         "Forbidden. You do not have permission to use hardware controls.",
     )
     if gate:
@@ -4340,7 +4374,7 @@ def hardware_log_read():
 @app.route("/api/hardware/log/reset", methods=["POST"])
 def hardware_log_reset():
     gate = _require_any_session_internal(
-        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
+        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle", "heater-control", "shaft-control"],
         "Forbidden. You do not have permission to use hardware controls.",
     )
     if gate:
@@ -4355,7 +4389,7 @@ def hardware_log_reset():
 @app.route("/api/hardware/command", methods=["POST"])
 def hardware_command():
     gate = _require_any_session_internal(
-        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
+        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle", "heater-control", "shaft-control"],
         "Forbidden. You do not have permission to use hardware controls.",
     )
     if gate:
@@ -4374,7 +4408,7 @@ def hardware_command():
 @app.route("/api/hardware/status", methods=["GET"])
 def hardware_status():
     gate = _require_any_session_internal(
-        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
+        ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle", "heater-control", "shaft-control"],
         "Forbidden. You do not have permission to use hardware controls.",
     )
     if gate:
@@ -4491,6 +4525,67 @@ def biometric_status():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _require_biometric_enroll_permission(username: str):
+    """Allow enroll for self, profile admin, or Factory acting on another member.
+
+    Factory may register/replace fingerprints for other profiles (Edit Profile /
+    Add Member flows). The Factory account itself cannot have a biometric.
+    """
+    err = _require_auth()
+    if err:
+        return err
+    data_service.refresh_current_user_from_member()
+    cur = data_service.get_current_user() or {}
+    cur_un = str(cur.get("username") or "").strip()
+    cur_role = str(cur.get("role") or "").strip().lower()
+    is_factory_actor = (
+        cur_un.upper() == data_service.FACTORY_USERNAME.upper() or cur_role == "factory"
+    )
+    target = str(username or "").strip()
+    if not target:
+        return jsonify({"ok": False, "error": "username is required"}), 400
+    if target.upper() == data_service.FACTORY_USERNAME.upper():
+        return jsonify({"ok": False, "error": "Factory account cannot enroll biometric."}), 403
+    if is_factory_actor:
+        # Factory enrolls biometrics for members they manage — not for itself.
+        return None
+    if cur_un.lower() == target.lower():
+        return None
+    if _session_has_internal("user-manage"):
+        return None
+    return jsonify({"ok": False, "error": "Forbidden. You do not have permission to enroll biometric for this user."}), 403
+
+
+def _delete_previous_biometric_template_after_replace(before_member: dict, new_template_id: int, username: str) -> None:
+    """After a successful new enroll, delete the member's previous sensor template (if different)."""
+    try:
+        old_raw = (before_member or {}).get("fingerprintTemplateId")
+        if old_raw is None or old_raw == "":
+            return
+        old_tid = int(old_raw)
+    except (TypeError, ValueError):
+        return
+    if old_tid <= 0 or old_tid == int(new_template_id or 0):
+        return
+    deleted = biometric_service.delete_template(old_tid)
+    ok = bool(deleted.get("ok"))
+    _audit_event(
+        action="Biometric template delete",
+        outcome="success" if ok else "failed",
+        entity_type="member",
+        entity_id=(before_member or {}).get("id"),
+        entity_name=username,
+        details=(
+            "Previous template {} replaced after successful re-enroll (new {})".format(old_tid, new_template_id)
+            if ok
+            else (deleted.get("error") or "Failed to delete previous fingerprint template from sensor")
+        ),
+        target_user=username,
+        before=before_member,
+        extra={"oldTemplateId": old_tid, "newTemplateId": new_template_id},
+    )
+
+
 @app.route("/api/biometric/enroll", methods=["POST"])
 def biometric_enroll():
     try:
@@ -4500,6 +4595,9 @@ def biometric_enroll():
         username = str(payload.get("username") or "").strip()
         if not username:
             return jsonify({"ok": False, "error": "username is required"}), 400
+        gate = _require_biometric_enroll_permission(username)
+        if gate:
+            return gate
         member = data_service.get_member_by_username(username)
         if not member:
             _audit_event(action="Biometric enroll", outcome="failed", entity_type="member", entity_name=username, details="Member not found for provided username", target_user=username)
@@ -4530,13 +4628,15 @@ def biometric_enroll():
         member["biometricEnrolledAt"] = int(time.time())
         member["biometricEnabled"] = True
         data_service.save_member(member)
+        _delete_previous_biometric_template_after_replace(before_member, template_id, username)
+        replaced = before_member.get("fingerprintTemplateId") not in (None, "", template_id)
         _audit_event(
             action="Biometric enroll",
             outcome="success",
             entity_type="member",
             entity_id=member.get("id"),
             entity_name=username,
-            details="Fingerprint enrolled and linked",
+            details="Fingerprint enrolled and linked" + (" (replaced previous template)" if replaced else ""),
             target_user=username,
             before=before_member,
             after=member,
@@ -4580,6 +4680,9 @@ def biometric_enroll_capture():
         username = str(payload.get("username") or "").strip()
         if not username:
             return jsonify({"ok": False, "error": "username is required"}), 400
+        gate = _require_biometric_enroll_permission(username)
+        if gate:
+            return gate
         try:
             step = int(payload.get("step") or 0)
         except (TypeError, ValueError):
@@ -4605,7 +4708,12 @@ def biometric_enroll_capture():
             if not captured.get("ok"):
                 _clear_enroll_session(username)
                 return jsonify(captured), 400
-            _set_enroll_session(username, {"templateId": template_id, "step1Done": True, "startedAt": int(time.time())})
+            _set_enroll_session(username, {
+                "templateId": template_id,
+                "step1Done": True,
+                "startedAt": int(time.time()),
+                "previousTemplateId": before_member.get("fingerprintTemplateId"),
+            })
             return jsonify({
                 "ok": True,
                 "step": 1,
@@ -4655,13 +4763,19 @@ def biometric_enroll_capture():
         member["biometricEnrolledAt"] = int(time.time())
         member["biometricEnabled"] = True
         data_service.save_member(member)
+        # Prefer session-captured previous id if member was refreshed mid-flow.
+        replace_before = dict(before_member)
+        if "previousTemplateId" in session and session.get("previousTemplateId") is not None:
+            replace_before["fingerprintTemplateId"] = session.get("previousTemplateId")
+        _delete_previous_biometric_template_after_replace(replace_before, template_id, username)
+        replaced = replace_before.get("fingerprintTemplateId") not in (None, "", template_id)
         _audit_event(
             action="Biometric enroll",
             outcome="success",
             entity_type="member",
             entity_id=member.get("id"),
             entity_name=username,
-            details="Fingerprint enrolled and linked (2 captures)",
+            details="Fingerprint enrolled and linked (2 captures)" + (" (replaced previous template)" if replaced else ""),
             target_user=username,
             before=before_member,
             after=member,
@@ -5117,7 +5231,10 @@ def disso_cmd_events():
 @app.route("/api/hardware/disso/recipe/upload", methods=["POST"])
 def disso_recipe_upload():
     try:
-        gate = _require_auth()
+        gate = _require_any_session_internal(
+            ["quick-test", "recipe-test"],
+            "Forbidden. You do not have permission to run tests.",
+        )
         if gate:
             return gate
         body = request.get_json(force=True, silent=True) or {}
@@ -5134,7 +5251,10 @@ def disso_recipe_upload():
 
 @app.route("/api/hardware/disso/test/start", methods=["POST"])
 def disso_hw_start():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to run tests.",
+    )
     if gate:
         return gate
     return jsonify(disso_cmd_hardware.start_test()), 200
@@ -5142,7 +5262,10 @@ def disso_hw_start():
 
 @app.route("/api/hardware/disso/preheat", methods=["POST"])
 def disso_hw_preheat():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test", "heater-control"],
+        "Forbidden. You do not have permission to preheat.",
+    )
     if gate:
         return gate
     body = request.get_json(force=True, silent=True) or {}
@@ -5163,7 +5286,10 @@ def disso_hw_preheat():
 @app.route("/api/hardware/disso/temperature/set", methods=["POST"])
 def disso_hw_set_temp():
     """Manual #SET-TEMP-xx.x* (Settings heater card)."""
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["heater-control", "quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to control the heater.",
+    )
     if gate:
         return gate
     body = request.get_json(force=True, silent=True) or {}
@@ -5177,7 +5303,10 @@ def disso_hw_set_temp():
 @app.route("/api/hardware/disso/heater/on", methods=["POST"])
 def disso_hw_heater_on():
     """SET-TEMP (optional) + PRE-HEAT for Settings heater ON."""
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["heater-control", "quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to control the heater.",
+    )
     if gate:
         return gate
     try:
@@ -5211,7 +5340,10 @@ def disso_hw_heater_on():
 @app.route("/api/hardware/disso/heater/off", methods=["POST"])
 def disso_hw_heater_off():
     """#STOP-HEAT* for Settings heater OFF."""
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["heater-control", "quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to control the heater.",
+    )
     if gate:
         return gate
     try:
@@ -5226,13 +5358,16 @@ def disso_hw_heater_off():
         pass
     result = disso_cmd_hardware.stop_heater()
     if result.get("ok"):
-        _audit(None, None, "Heater off", "STOP-HEAT")
+        _audit(None, None, "Heater off", "Heater stopped")
     return jsonify(result), 200 if result.get("ok") else 400
 
 
 @app.route("/api/hardware/disso/test/pause", methods=["POST"])
 def disso_hw_pause():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to run tests.",
+    )
     if gate:
         return gate
     return jsonify(disso_cmd_hardware.pause_test()), 200
@@ -5240,7 +5375,10 @@ def disso_hw_pause():
 
 @app.route("/api/hardware/disso/test/stop", methods=["POST"])
 def disso_hw_stop():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test"],
+        "Forbidden. You do not have permission to run tests.",
+    )
     if gate:
         return gate
     return jsonify(disso_cmd_hardware.stop_test()), 200
@@ -5248,7 +5386,10 @@ def disso_hw_stop():
 
 @app.route("/api/hardware/disso/rpm/start", methods=["POST"])
 def disso_rpm_start():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test", "validation-test"],
+        "Forbidden. You do not have permission to control the stirrer.",
+    )
     if gate:
         return gate
     body = request.get_json(force=True, silent=True) or {}
@@ -5257,7 +5398,10 @@ def disso_rpm_start():
 
 @app.route("/api/hardware/disso/rpm/stop", methods=["POST"])
 def disso_rpm_stop():
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["quick-test", "recipe-test", "validation-test"],
+        "Forbidden. You do not have permission to control the stirrer.",
+    )
     if gate:
         return gate
     body = request.get_json(force=True, silent=True) or {}
@@ -5266,7 +5410,10 @@ def disso_rpm_stop():
 
 @app.route("/api/hardware/disso/lift/<action>", methods=["POST"])
 def disso_lift(action):
-    gate = _require_auth()
+    gate = _require_any_session_internal(
+        ["shaft-control", "quick-test", "recipe-test", "validation-test"],
+        "Forbidden. You do not have permission to control the shaft.",
+    )
     if gate:
         return gate
     try:
@@ -5277,7 +5424,10 @@ def disso_lift(action):
 
 @app.route("/api/hardware/disso/clean", methods=["POST"])
 def disso_clean():
-    gate = _require_auth()
+    gate = _require_session_internal(
+        "cleaning-cycle",
+        "Forbidden. You do not have permission to run cleaning.",
+    )
     if gate:
         return gate
     body = request.get_json(force=True, silent=True) or {}

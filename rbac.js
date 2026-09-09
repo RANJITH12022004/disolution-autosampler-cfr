@@ -4,6 +4,9 @@
  * Non-Factory users (including Admin): capability is driven only by permission cards
  * stored in featureOverrides.allow. Role name does not grant feature access.
  * Factory / RLERLT: full access except factory-only routes handled separately.
+ *
+ * Role caps may soften a card-granted feature to view-only; they must never revoke
+ * a feature that was explicitly granted via permission cards (DT / Hardness-Cfr card model).
  */
 
 var ROLE_RESTRICTIONS = {
@@ -12,33 +15,15 @@ var ROLE_RESTRICTIONS = {
     'factory-reset': 'no-access',
   },
   supervisor: {
-    'user-manage': 'view-only',
-    'user-add': 'no-access',
-    'user-delete': 'no-access',
-    'user-unlock': 'no-access',
-    'user-enable': 'no-access',
-    'user-change-role': 'no-access',
     'factory-settings': 'view-only',
     'factory-reset': 'no-access',
-    'edit-datetime': 'no-access',
-    'reports-delete': 'no-access',
-    'recipe-delete': 'no-access',
+    // Soft caps only — cards still grant the feature; these limit write actions.
+    'user-manage': 'view-only',
+    'reports-delete': 'view-only',
   },
   user: {
-    'user-manage': 'no-access',
-    'user-add': 'no-access',
-    'user-delete': 'no-access',
-    'user-unlock': 'no-access',
-    'user-enable': 'no-access',
-    'user-change-role': 'no-access',
     'factory-settings': 'no-access',
     'factory-reset': 'no-access',
-    'edit-datetime': 'no-access',
-    'recipe-edit': 'no-access',
-    'recipe-delete': 'no-access',
-    'reports-delete': 'no-access',
-    'validate-menu': 'no-access',
-    'validation-test': 'no-access',
   },
   factory: {},
 };
@@ -69,7 +54,7 @@ var PERMISSION_CARD_KEYS = [
  * Internal keys are unique strings (screen map, action checks, or explicit gates).
  */
 var PERM_CARD_EXPAND = {
-  perm_test_access: ['quick-test', 'recipe-test'],
+  perm_test_access: ['quick-test', 'recipe-test', 'heater-control', 'shaft-control', 'settings'],
   perm_test_report_approve: ['test-report-approve'],
   perm_recipe_manage: ['recipe-manage', 'recipe-list', 'recipe-edit', 'recipe-delete', 'disable-recipes', 'recipe-enable', 'settings'],
   perm_recipe_approve: ['recipe-approve'],
@@ -134,6 +119,8 @@ var LEGACY_INTERNAL_KEYS = [
   'wakeup-schedule',
   'cleaning-cycle',
   'edit-datetime',
+  'heater-control',
+  'shaft-control',
   'profile',
   'user-manage',
   'user-add',
@@ -184,11 +171,12 @@ var SCREEN_FEATURE_MAP = {
   'system-settings': 'system-settings',
   'system-info': 'settings',
   'hardware-init': 'settings',
-  'heater-control': 'settings',
-  'shaft-control': 'settings',
+  'heater-control': 'heater-control',
+  'shaft-control': 'shaft-control',
   'cleaning-cycle': 'cleaning-cycle',
   'ip-config': 'settings',
   'ip-config-result': 'settings',
+  'ip-configure': 'settings',
   'wakeup-schedule': 'wakeup-schedule',
   'factory-settings': 'factory-settings',
   datetime: 'edit-datetime',
@@ -348,6 +336,8 @@ function getEffectiveRestriction(roleOrUser, featureKey) {
 
   if (featureKey === 'dashboard' || featureKey === 'login') return 'full-access';
   if (featureKey === 'profile') return 'full-access';
+  if (featureKey === 'ip-configure' || featureKey === 'ip-config') return 'full-access';
+  if (featureKey === 'settings') return 'full-access';
 
   if (featureKey === 'factory-settings' || featureKey === 'factory-reset') {
     return role === 'factory' ? 'full-access' : 'no-access';
@@ -363,8 +353,8 @@ function getEffectiveRestriction(roleOrUser, featureKey) {
   });
   if (!hasFeature) return 'no-access';
 
+  // Cards drive access: role may soften to view-only, but must not revoke a card grant.
   var roleCap = getRestriction(role, featureKey);
-  if (roleCap === 'no-access') return 'no-access';
   if (roleCap === 'view-only') return 'view-only';
   return 'full-access';
 }
@@ -372,6 +362,11 @@ function getEffectiveRestriction(roleOrUser, featureKey) {
 function canAccess(roleOrUser, featureKey) {
   var restriction = getEffectiveRestriction(roleOrUser, featureKey);
   return restriction !== 'no-access';
+}
+
+/** Validate hub: allow if user may run validation and/or calibration. */
+function canAccessValidationOrCalibration(roleOrUser) {
+  return canAccess(roleOrUser, 'validation-test') || canAccess(roleOrUser, 'calibration-menu');
 }
 
 function isViewOnly(roleOrUser, featureKey) {
@@ -389,21 +384,31 @@ function canPerformAction(roleOrUser, featureKey, action) {
 }
 
 function checkNavigationAccess(screenId) {
-  if (screenId === 'login') return true;
+  if (screenId === 'login' || screenId === 'password-expired-reset') return true;
+  var userObj = (typeof window !== 'undefined' && window.currentUser) ? window.currentUser : null;
   var role = getCurrentRole();
-  if (!role) return false;
+  if (!role && !userObj) return false;
+  if (screenId === 'home') return true;
+  if (screenId === 'report-preview') {
+    if (typeof userCanOpenReportPreview === 'function') {
+      return userCanOpenReportPreview(userObj);
+    }
+  }
   var featureKey = SCREEN_FEATURE_MAP[screenId] || screenId;
   if (screenId === 'manage-recipes') {
     var mode = (typeof window !== 'undefined' && window.recipeListMode) ? window.recipeListMode : 'manage';
     featureKey = mode === 'load' ? 'recipe-test' : 'recipe-manage';
   }
+  if (screenId === 'validate') {
+    return canAccessValidationOrCalibration(userObj || role);
+  }
   if (screenId === 'vessel-temperature' || screenId === 'shaft-position') {
-    var u = window.currentUser || role;
-    return canAccess(u, 'recipe-test') || canAccess(u, 'settings');
+    var u = userObj || role;
+    return canAccess(u, 'recipe-test') || canAccess(u, 'quick-test') || canAccess(u, 'heater-control') || canAccess(u, 'shaft-control');
   }
   if (screenId === 'test-run') {
-    var tu = window.currentUser || role;
+    var tu = userObj || role;
     return canAccess(tu, 'recipe-test') || canAccess(tu, 'quick-test');
   }
-  return canAccess(window.currentUser || role, featureKey);
+  return canAccess(userObj || role, featureKey);
 }

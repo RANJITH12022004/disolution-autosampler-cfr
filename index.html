@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=90">
+    <link rel="stylesheet" href="styles.css?v=92">
 </head>
 
 <body>
@@ -678,6 +678,7 @@
                         </div>
                         <div class="add-member-actions members-actions-row">
                             <button class="btn btn-primary" onclick="submitPasswordResetFromLoginPage()">Update Password</button>
+                            <button type="button" class="btn btn-secondary" id="password-reset-cancel-btn" style="display: none;" onclick="cancelProfilePasswordReset()">Cancel</button>
                         </div>
                     </div>
                 </div>
@@ -2348,19 +2349,22 @@
                             </div>
                             <div class="profile-edit-form">
                                 <div class="form-group full-width">
-                                    <label>Edit Full Name</label>
-                                    <input type="text" id="profile-fullname" class="input-field"
-                                        placeholder="Full name">
+                                    <label>Full Name</label>
+                                    <input type="text" id="profile-fullname" class="input-field input-readonly profile-identity-field"
+                                        placeholder="Full name" readonly disabled tabindex="-1" aria-readonly="true">
                                 </div>
                                 <div class="form-group full-width">
-                                    <label>Edit Password</label>
-                                    <input type="password" id="profile-password" class="input-field"
-                                        placeholder="Enter new password">
+                                    <label>User ID</label>
+                                    <input type="text" id="profile-userid" class="input-field input-readonly profile-identity-field"
+                                        placeholder="User ID" readonly disabled tabindex="-1" autocomplete="off" aria-readonly="true">
+                                </div>
+                                <div class="form-group full-width">
+                                    <label>Password</label>
+                                    <button type="button" class="btn btn-blue btn-block" id="profile-edit-password-btn" onclick="openProfilePasswordResetPage()">Edit Password</button>
                                 </div>
                             </div>
                         </div>
                         <div class="profile-actions">
-                            <button class="btn btn-blue btn-block" onclick="saveUserProfile()">Save</button>
                             <button class="btn btn-orange btn-block" onclick="goToPage('manage-members')">Manage Profiles</button>
                             <button class="btn btn-blue btn-block" onclick="openAddMember()">Add Members</button>
                         </div>
@@ -2562,6 +2566,7 @@
 
                         <div class="add-member-actions members-actions-row">
                             <button type="button" class="btn btn-primary" id="add-member-save-btn" onclick="saveMemberForm()">Save Profile</button>
+                            <button type="button" class="btn btn-secondary is-hidden" id="edit-member-enroll-biometric-btn" onclick="openEditMemberBiometricEnroll()">Register Fingerprint</button>
                             <button type="button" class="btn btn-secondary" onclick="cancelAddMemberEdit()">Cancel</button>
                         </div>
                     </div>
@@ -2764,9 +2769,9 @@
     <script src="keyboard.js?v=3"></script>
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
-    <script src="rbac.js?v=7"></script>
+    <script src="rbac.js?v=8"></script>
     <script src="disso_client.js?v=7"></script>
-    <script src="script.js?v=99"></script>
+    <script src="script.js?v=103"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

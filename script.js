@@ -1158,6 +1158,7 @@ function updateProfileFromCurrentUser(user) {
     if (!user) return;
     var name = user.name || user.username || '';
     var role = user.role || '';
+    var username = user.username || '';
     var nameEl = document.getElementById('profile-name-display');
     if (nameEl) {
         nameEl.textContent = name || '---';
@@ -1167,8 +1168,12 @@ function updateProfileFromCurrentUser(user) {
         roleEl.textContent = displayRoleLabel(role);
     }
     var fullNameInput = document.getElementById('profile-fullname');
-    if (fullNameInput && name) {
-        fullNameInput.value = name;
+    if (fullNameInput) {
+        fullNameInput.value = name || '';
+    }
+    var userIdInput = document.getElementById('profile-userid');
+    if (userIdInput) {
+        userIdInput.value = username || '';
     }
 }
 
@@ -2269,6 +2274,7 @@ function completeSuccessfulLogin(user) {
 function showPasswordExpiredResetScreen(username, oldPassword) {
     window._passwordResetScreenMode = 'expired';
     window._mandatoryPasswordResetPending = false;
+    _setPasswordResetCancelVisible(false);
     var titleEl = document.getElementById('password-reset-page-title');
     var subEl = document.getElementById('password-reset-page-subtitle');
     if (titleEl) titleEl.textContent = 'Reset Expired Password';
@@ -2304,6 +2310,7 @@ function showPasswordExpiredResetScreen(username, oldPassword) {
 function showMandatoryPasswordResetScreen(username) {
     window._passwordResetScreenMode = 'mandatory';
     window._mandatoryPasswordResetPending = true;
+    _setPasswordResetCancelVisible(false);
     var titleEl = document.getElementById('password-reset-page-title');
     var subEl = document.getElementById('password-reset-page-subtitle');
     if (titleEl) titleEl.textContent = 'Reset your password';
@@ -2338,6 +2345,126 @@ function showMandatoryPasswordResetScreen(username) {
     }, 60);
 }
 
+function _setPasswordResetCancelVisible(visible) {
+    var btn = document.getElementById('password-reset-cancel-btn');
+    if (btn) btn.style.display = visible ? '' : 'none';
+}
+
+function openProfilePasswordResetPage() {
+    var user = window.currentUser || {};
+    var username = String(user.username || user.name || '').trim();
+    if (!username) {
+        if (typeof showAppModal === 'function') showAppModal('No user logged in.', 'Change Password');
+        return;
+    }
+    var unUpper = username.toUpperCase();
+    if (unUpper === String(FACTORY_USERNAME || 'RLERLT').toUpperCase() || user.id === 0) {
+        if (typeof showAppModal === 'function') {
+            showAppModal('Factory account password cannot be changed here.', 'Change Password');
+        }
+        return;
+    }
+    window._passwordResetScreenMode = 'profile';
+    window._mandatoryPasswordResetPending = false;
+    _setPasswordResetCancelVisible(true);
+    var titleEl = document.getElementById('password-reset-page-title');
+    var subEl = document.getElementById('password-reset-page-subtitle');
+    if (titleEl) titleEl.textContent = 'Change Password';
+    if (subEl) subEl.textContent = 'Enter your current password and choose a new one.';
+    goToPage('password-expired-reset');
+    setTimeout(function () {
+        var userEl = document.getElementById('expired-reset-username');
+        var oldEl = document.getElementById('expired-reset-old-password');
+        var newEl = document.getElementById('expired-reset-new-password');
+        var confEl = document.getElementById('expired-reset-confirm-password');
+        if (userEl) userEl.value = username;
+        if (oldEl) oldEl.value = '';
+        if (newEl) newEl.value = '';
+        if (confEl) confEl.value = '';
+        if (oldEl && typeof oldEl.focus === 'function') oldEl.focus();
+    }, 60);
+}
+
+function cancelProfilePasswordReset() {
+    window._passwordResetScreenMode = null;
+    _setPasswordResetCancelVisible(false);
+    goToPage('user-profile');
+}
+
+function _offerSelfBiometricAfterPasswordChange() {
+    if (!biometricEnabledSetting) {
+        goToPage('user-profile');
+        return;
+    }
+    var user = window.currentUser || {};
+    var unUpper = String(user.username || '').trim().toUpperCase();
+    if (unUpper === String(FACTORY_USERNAME || 'RLERLT').toUpperCase() || user.id === 0) {
+        goToPage('user-profile');
+        return;
+    }
+    var ask = (typeof showConfirmModal === 'function')
+        ? showConfirmModal('Register or replace your fingerprint now?', 'Register Fingerprint')
+        : Promise.resolve(false);
+    ask.then(function (ok) {
+        if (!ok) {
+            goToPage('user-profile');
+            return;
+        }
+        _populateMemberBiometricSummary({
+            name: user.name || user.username || '',
+            username: user.username || '',
+            role: user.role || ''
+        });
+        goToPage('member-biometric');
+    }).catch(function () {
+        goToPage('user-profile');
+    });
+}
+
+function submitProfilePasswordChange() {
+    var userEl = document.getElementById('expired-reset-username');
+    var oldEl = document.getElementById('expired-reset-old-password');
+    var newEl = document.getElementById('expired-reset-new-password');
+    var confEl = document.getElementById('expired-reset-confirm-password');
+    var username = userEl ? String(userEl.value || '').trim() : '';
+    var oldPassword = oldEl ? String(oldEl.value || '') : '';
+    var newPassword = newEl ? String(newEl.value || '') : '';
+    var confirmPassword = confEl ? String(confEl.value || '') : '';
+
+    if (!username || !oldPassword || !newPassword || !confirmPassword) {
+        showAppModal('Enter current password, new password, and confirmation.', 'Change Password');
+        return;
+    }
+    if (newPassword !== confirmPassword) {
+        showAppModal('New password and confirmation do not match.', 'Change Password');
+        return;
+    }
+    if (oldPassword === newPassword) {
+        showAppModal('New password must be different from your current password.', 'Change Password');
+        return;
+    }
+    var passwordError = getStrongPasswordError(newPassword);
+    if (passwordError) {
+        showAppModal(passwordError, 'Change Password');
+        return;
+    }
+    apiRequest(API_BASE + '/api/data/auth/change-password', {
+        method: 'POST',
+        body: { oldPassword: oldPassword, newPassword: newPassword }
+    }).then(function () {
+        if (oldEl) oldEl.value = '';
+        if (newEl) newEl.value = '';
+        if (confEl) confEl.value = '';
+        window._passwordResetScreenMode = null;
+        _setPasswordResetCancelVisible(false);
+        showAppModal('Password updated.', 'Change Password', function () {
+            _offerSelfBiometricAfterPasswordChange();
+        });
+    }).catch(function (err) {
+        showAppModal((err && err.message) ? err.message : 'Failed to change password.', 'Change Password');
+    });
+}
+
 function _restoreSidebarAndHeaderAfterExpiredReset() {
     var sidebar = document.querySelector('.app-container .sidebar');
     var header = document.querySelector('.app-container .app-header');
@@ -2356,6 +2483,8 @@ function _restoreSidebarAndHeaderAfterExpiredReset() {
 function submitPasswordResetFromLoginPage() {
     if (window._passwordResetScreenMode === 'mandatory') {
         submitMandatoryPasswordReset();
+    } else if (window._passwordResetScreenMode === 'profile') {
+        submitProfilePasswordChange();
     } else {
         submitExpiredPasswordReset();
     }
@@ -2512,16 +2641,18 @@ function updateSettingsVisibility() {
         ['.settings-system', 'system-settings'],
         ['.settings-wakeup', 'wakeup-schedule'],
         ['.settings-cleaning', 'cleaning-cycle'],
+        ['.settings-heater', 'heater-control'],
+        ['.settings-shaft', 'shaft-control'],
+        ['.settings-datetime', 'edit-datetime'],
+        ['.settings-hw-init', 'settings'],
+        ['.settings-disable', 'disable-recipes'],
     ];
     cardFeatures.forEach(function (pair) {
-        var card = document.querySelector(pair[0]);
-        if (card) card.style.display = canSee(pair[1]) ? '' : 'none';
+        document.querySelectorAll(pair[0]).forEach(function (card) {
+            card.style.display = canSee(pair[1]) ? '' : 'none';
+        });
     });
 
-    var disableCard = document.querySelector('.settings-disable');
-    if (disableCard) {
-        disableCard.style.display = canSee('disable-recipes') ? '' : 'none';
-    }
     var factoryCard = document.querySelector('.settings-factory');
     if (factoryCard) {
         factoryCard.style.display = String(role || '').toLowerCase() === 'factory' ? '' : 'none';
@@ -2541,6 +2672,8 @@ function refreshShellAccessVisibility() {
         var ok = true;
         if (page === 'home') {
             ok = true;
+        } else if (page === 'validate' && typeof canAccessValidationOrCalibration === 'function') {
+            ok = !!(u && canAccessValidationOrCalibration(u));
         } else if (u && typeof canAccess === 'function') {
             ok = canAccess(u, feat);
         } else if (!u) {
@@ -8960,25 +9093,41 @@ function ensureAddMemberPageScroll() {
 function _setAddMemberPageMode(isEdit, isSelfEdit) {
     var titleEl = document.getElementById('add-member-page-title');
     var saveBtn = document.getElementById('add-member-save-btn');
+    var fullNameEl = document.getElementById('add-fullname');
     var userIdEl = document.getElementById('add-userid');
     var pwdLabel = document.getElementById('add-password-label');
     var confirmPwdLabel = document.getElementById('add-confirm-password-label');
     var roleContainer = document.querySelector('#page-add-member .role-selection-container');
     var headerTitle = document.getElementById('header-title');
-    var bioBtn = document.getElementById('enroll-biometric-btn');
+    var bioBtn = document.getElementById('edit-member-enroll-biometric-btn');
     if (titleEl) titleEl.textContent = isEdit ? 'Edit Profile' : 'Add New Member';
     if (saveBtn) saveBtn.textContent = isEdit ? 'Update Profile' : 'Save Profile';
     if (headerTitle) headerTitle.textContent = isEdit ? 'Edit Profile' : (PAGE_TITLES['add-member'] || 'Add New Member');
-    if (userIdEl) {
-        userIdEl.readOnly = !!isEdit;
-        userIdEl.disabled = !!isEdit;
-        if (isEdit) userIdEl.classList.add('input-readonly');
-        else userIdEl.classList.remove('input-readonly');
-    }
+    // Full name + User ID are immutable after create.
+    [fullNameEl, userIdEl].forEach(function (el) {
+        if (!el) return;
+        el.readOnly = !!isEdit;
+        el.disabled = !!isEdit;
+        if (isEdit) {
+            el.classList.add('input-readonly');
+            el.tabIndex = -1;
+            el.setAttribute('aria-readonly', 'true');
+        } else {
+            el.classList.remove('input-readonly');
+            el.removeAttribute('aria-readonly');
+            el.tabIndex = 0;
+        }
+    });
     if (pwdLabel) pwdLabel.textContent = isEdit ? 'New Password (optional)' : 'Password';
     if (confirmPwdLabel) confirmPwdLabel.textContent = isEdit ? 'Confirm New Password (optional)' : 'Confirm Password';
     if (roleContainer) roleContainer.style.display = isSelfEdit ? 'none' : '';
-    if (bioBtn) bioBtn.classList.toggle('is-hidden', !!isEdit);
+    if (bioBtn) {
+        if (isEdit && biometricEnabledSetting) {
+            bioBtn.classList.remove('is-hidden');
+        } else {
+            bioBtn.classList.add('is-hidden');
+        }
+    }
     if (isSelfEdit) {
         var panel = document.getElementById('add-member-permissions-panel');
         if (panel) {
@@ -8996,12 +9145,15 @@ function _clearAddMemberForm() {
         var el = document.getElementById(id);
         if (el) el.value = '';
     });
-    var userIdEl = document.getElementById('add-userid');
-    if (userIdEl) {
-        userIdEl.readOnly = false;
-        userIdEl.disabled = false;
-        userIdEl.classList.remove('input-readonly');
-    }
+    ['add-fullname', 'add-userid'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.readOnly = false;
+        el.disabled = false;
+        el.classList.remove('input-readonly');
+        el.removeAttribute('aria-readonly');
+        el.tabIndex = 0;
+    });
     if (typeof selectRole === 'function') selectRole('User');
     _addMemberFeatureOverrides = { allow: [], deny: [] };
     _setAddMemberPageMode(false, false);
@@ -9117,28 +9269,25 @@ function saveEditedMember() {
     var memberId = editingMemberId;
     if (memberId == null) return;
     var modalTitle = 'Edit Profile';
-    var fullNameEl = document.getElementById('add-fullname');
-    var userIdEl = document.getElementById('add-userid');
     var pwdEl = document.getElementById('add-password');
     var confirmPwdEl = document.getElementById('add-confirm-password');
     var roleHidden = document.getElementById('selected-role');
 
-    var fullName = fullNameEl && fullNameEl.value ? fullNameEl.value.trim() : '';
-    var username = userIdEl && userIdEl.value ? userIdEl.value.trim() : '';
     var password = pwdEl && pwdEl.value ? pwdEl.value : '';
     var confirmPassword = confirmPwdEl && confirmPwdEl.value ? confirmPwdEl.value : '';
     var role = roleHidden && roleHidden.value ? roleHidden.value : 'User';
     var isSelf = _isEditingOwnMemberProfile(memberId);
+    var wantsPasswordChange = !!(password || confirmPassword);
 
-    if (!fullName || !username) {
-        showAppModal('Full name and User ID are required.', modalTitle);
+    if (isSelf && wantsPasswordChange) {
+        showAppModal('Change your own password from User Profile → Edit Password (current password required).', modalTitle);
         return;
     }
-    if (username.toUpperCase() === FACTORY_USERNAME) {
-        showAppModal('This User ID is reserved for the factory account.', modalTitle);
-        return;
-    }
-    if (password || confirmPassword) {
+    if (wantsPasswordChange) {
+        if (!password || !confirmPassword) {
+            showAppModal('Enter the new password and confirmation, or leave both blank to keep the current password.', modalTitle);
+            return;
+        }
         if (password !== confirmPassword) {
             showAppModal('Password and Confirm Password do not match.', modalTitle);
             return;
@@ -9154,8 +9303,8 @@ function saveEditedMember() {
         .then(function (data) {
             var member = (data && data.member) ? data.member : null;
             if (!member) throw new Error('Member not found');
-            member.name = fullName;
-            member.username = username;
+            // Name and User ID are immutable after create — never send name changes.
+            delete member.password;
             if (!isSelf) {
                 member.role = role;
             }
@@ -9175,6 +9324,11 @@ function saveEditedMember() {
                 }
                 member.featureOverrides = { allow: allowList, deny: [] };
             }
+            if (isSelf && !wantsPasswordChange) {
+                // Self may only change password via change-password; role/permissions locked.
+                showAppModal('No changes to save. Use User Profile → Edit Password to change your password.', modalTitle);
+                return Promise.reject(new Error('noop'));
+            }
             return apiRequest(API_BASE + '/api/data/members/' + memberId, {
                 method: 'PUT',
                 body: member
@@ -9184,13 +9338,46 @@ function saveEditedMember() {
             editingMemberId = null;
             _clearAddMemberForm();
             loadMembersAndRender();
-            showAppModal('Profile updated successfully.', modalTitle);
+            showAppModal(
+                wantsPasswordChange ? 'Profile and password updated successfully.' : 'Profile updated successfully.',
+                modalTitle
+            );
             goToPage('manage-members');
         })
         .catch(function (err) {
-            if (err && err.message === 'permissions') return;
+            if (err && (err.message === 'permissions' || err.message === 'noop')) return;
             showAppModal('Failed to update profile: ' + (err && err.message ? err.message : 'Unknown error'), modalTitle);
         });
+}
+
+function openEditMemberBiometricEnroll() {
+    if (!biometricEnabledSetting) {
+        showAppModal('Biometric enrollment is disabled by Factory Settings.', 'Biometric Disabled');
+        return;
+    }
+    var memberId = editingMemberId;
+    if (memberId == null) {
+        showAppModal('Open Edit Profile for a member first.', 'Register Fingerprint');
+        return;
+    }
+    var fullNameEl = document.getElementById('add-fullname');
+    var userIdEl = document.getElementById('add-userid');
+    var roleHidden = document.getElementById('selected-role');
+    var username = userIdEl && userIdEl.value ? userIdEl.value.trim() : '';
+    if (!username) {
+        showAppModal('Member User ID is missing.', 'Register Fingerprint');
+        return;
+    }
+    if (username.toUpperCase() === FACTORY_USERNAME) {
+        showAppModal('The Factory account itself cannot have a fingerprint. Enroll biometrics for other profiles from Edit Profile.', 'Register Fingerprint');
+        return;
+    }
+    _populateMemberBiometricSummary({
+        name: fullNameEl && fullNameEl.value ? fullNameEl.value.trim() : '',
+        username: username,
+        role: roleHidden && roleHidden.value ? roleHidden.value : ''
+    });
+    goToPage('member-biometric');
 }
 
 function saveNewMember() {
@@ -9373,70 +9560,13 @@ function openAddMember() {
 }
 
 function saveUserProfile() {
-    var fullNameEl = document.getElementById('profile-fullname');
-    var passwordEl = document.getElementById('profile-password');
-    var newName = fullNameEl ? (fullNameEl.value || '').trim() : '';
-    var newPassword = passwordEl ? (passwordEl.value || '') : '';
-    if (newPassword) {
-        var profilePasswordError = getStrongPasswordError(newPassword);
-        if (profilePasswordError) {
-            if (typeof showAppModal === 'function') showAppModal(profilePasswordError, 'User Profile');
-            return;
-        }
-    }
-
-    var user = (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser : (typeof currentUser !== 'undefined' && currentUser) ? currentUser : null;
-    if (!user) {
-        if (typeof showAppModal === 'function') showAppModal('No user logged in.', 'User Profile');
+    if (typeof openProfilePasswordResetPage === 'function') {
+        openProfilePasswordResetPage();
         return;
     }
-
-    var memberId = user.id;
-    var isFactory = (memberId === 0 || memberId === undefined || memberId === null);
-
-    function updateLocalName(name) {
-        if (window.currentUser) window.currentUser.name = name;
-        if (typeof currentUser !== 'undefined') { currentUser = currentUser || {}; currentUser.name = name; }
-        try { localStorage.setItem('currentUser', JSON.stringify(window.currentUser || currentUser)); } catch (e) {}
-        var displayEl = document.getElementById('profile-name-display');
-        if (displayEl) displayEl.textContent = name || '---';
+    if (typeof showAppModal === 'function') {
+        showAppModal('Use Edit Password to change your password.', 'User Profile');
     }
-
-    if (isFactory) {
-        updateLocalName(newName || user.name || user.username || 'Factory');
-        if (passwordEl) passwordEl.value = '';
-        if (typeof showAppModal === 'function') showAppModal('Profile updated.', 'User Profile');
-        return;
-    }
-
-    var payload = {};
-    if (newName) payload.name = newName;
-    if (newPassword) payload.password = newPassword;
-    if (!payload.name && !payload.password) {
-        if (typeof showAppModal === 'function') {
-            showAppModal('Enter a new full name and/or password to save.', 'User Profile');
-        }
-        return;
-    }
-    if (!payload.name) {
-        payload.name = (user.name || user.username || '').trim();
-    }
-
-    apiRequest(API_BASE + '/api/data/auth/profile', {
-        method: 'PUT',
-        body: payload
-    })
-        .then(function (result) {
-            var updated = (result && result.member) ? result.member : result;
-            var nameToSet = (updated && updated.name) ? updated.name : newName;
-            updateLocalName(nameToSet || newName || (user.name || user.username));
-            if (passwordEl) passwordEl.value = '';
-            if (typeof showAppModal === 'function') showAppModal('Profile updated.', 'User Profile');
-        })
-        .catch(function (err) {
-            var msg = (err && err.message) ? err.message : 'Failed to update profile.';
-            if (typeof showAppModal === 'function') showAppModal(msg, 'User Profile');
-        });
 }
 
 function initializeDatetime() {

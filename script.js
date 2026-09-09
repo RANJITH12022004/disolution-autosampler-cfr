@@ -8516,9 +8516,8 @@ function loadManageRecipes() {
             var apprLabel = appr === 'pending' ? 'Pending' : 'Approved';
 
             if (mode === 'load') {
-                // Load Recipe: Disable + Load only (no Edit).
+                // Load Recipe: Load only (Disable is under Manage / Disabled Recipes).
                 var loadActionsHtml =
-                    '<button type="button" class="btn-action btn-disable" onclick="disableRecipe(' + (r.id || 0) + ')" title="Disable">Disable</button> ' +
                     '<button type="button" class="btn-action btn-load" onclick="loadRecipeById(' + (r.id || 0) + ')" title="Load">Load</button>';
                 tr.innerHTML =
                     '<td>' + name + '</td>' +

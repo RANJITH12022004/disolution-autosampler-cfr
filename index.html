@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=87">
+    <link rel="stylesheet" href="styles.css?v=88">
 </head>
 
 <body>
@@ -2076,6 +2076,16 @@
                             </div>
                             <h3>Heater</h3>
                         </button>
+                        <button class="settings-card settings-shaft" onclick="openShaftControlPage()">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 19V5"></path>
+                                    <path d="M5 12l7-7 7 7"></path>
+                                </svg>
+                            </div>
+                            <h3>Shaft Controls</h3>
+                        </button>
                         <button class="settings-card settings-cleaning" onclick="goToPage('cleaning-cycle')">
                             <div class="settings-icon">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -2120,7 +2130,7 @@
                         <div class="hw-init-card">
                             <div class="hw-init-status-band" id="hw-init-status-band" aria-live="polite">
                                 <div class="hw-init-phase" id="hw-init-phase">Ready</div>
-                                <div class="hw-init-detail" id="hw-init-detail">Press Initialize to send #INIT* to the ESP.</div>
+                                <div class="hw-init-detail" id="hw-init-detail">Press Initialize to reset hardware to a safe idle state.</div>
                             </div>
                             <div class="hw-init-actions">
                                 <button type="button" class="btn btn-primary hw-init-primary-btn" id="hw-init-start-btn"
@@ -2164,7 +2174,7 @@
                             </div>
 
                             <div class="heater-ctrl-status" id="heater-ctrl-status" aria-live="polite">
-                                Set temperature, then turn the heater ON to send commands to the ESP.
+                                Set temperature, then turn the heater ON.
                             </div>
 
                             <div class="heater-ctrl-actions">
@@ -2173,6 +2183,51 @@
                                 <button type="button" class="btn btn-secondary"
                                     onclick="goToPage('settings')">Back</button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shaft controls (Settings) — same UX as test Shaft Position -->
+                <div class="page" id="page-shaft-control">
+                    <div class="sp-page settings-shaft-page">
+                        <header class="sp-toolbar">
+                            <div class="sp-title-block">
+                                <h2 class="sp-page-title">Shaft Controls</h2>
+                                <p class="sp-page-sub">Raise, lower, or stop the shaft</p>
+                            </div>
+                            <button type="button" class="btn btn-secondary sp-back-btn" onclick="goToPage('settings')">Back</button>
+                        </header>
+                        <div class="sp-status-card" aria-live="polite">
+                            <span class="sp-status-key">Status</span>
+                            <strong class="sp-status-val" id="settings-shaft-status">Stopped</strong>
+                        </div>
+                        <div class="sp-controls" role="group" aria-label="Shaft controls">
+                            <button type="button" class="sp-card sp-btn-up" id="settings-shaft-up" onclick="settingsShaftCommand('up')" aria-label="Shaft up">
+                                <span class="sp-card-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M32 52V14"/>
+                                        <path d="M16 28l16-16 16 16"/>
+                                    </svg>
+                                </span>
+                                <span class="sp-card-label">Up</span>
+                            </button>
+                            <button type="button" class="sp-card sp-btn-stop is-active" id="settings-shaft-stop" onclick="settingsShaftCommand('stop')" aria-label="Shaft stop">
+                                <span class="sp-card-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 64 64" width="72" height="72" fill="currentColor">
+                                        <rect x="16" y="16" width="32" height="32" rx="4"/>
+                                    </svg>
+                                </span>
+                                <span class="sp-card-label">Stop</span>
+                            </button>
+                            <button type="button" class="sp-card sp-btn-down" id="settings-shaft-down" onclick="settingsShaftCommand('down')" aria-label="Shaft down">
+                                <span class="sp-card-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M32 12v38"/>
+                                        <path d="M16 36l16 16 16-16"/>
+                                    </svg>
+                                </span>
+                                <span class="sp-card-label">Down</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -2706,9 +2761,9 @@
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=7"></script>
-    <script src="disso_client.js?v=4"></script>
-    <script src="script.js?v=96"></script>
-    <script src="validation_suite.js?v=1"></script>
+    <script src="disso_client.js?v=5"></script>
+    <script src="script.js?v=97"></script>
+    <script src="validation_suite.js?v=2"></script>
 </body>
 
 </html>

@@ -102,8 +102,14 @@ def main():
     if not _run_parsing_self_test():
         return 1
 
-    os.environ.setdefault("UART_LOG_PATH", os.path.join(APP_ROOT, "uart_communications.log"))
+    os.environ.setdefault("UART_LOG_PATH", os.path.join(APP_ROOT, "uart1_communications.log"))
+    os.environ.setdefault("UART1_LOG_PATH", os.path.join(APP_ROOT, "uart1_communications.log"))
+    os.environ.setdefault("UART2_LOG_PATH", os.path.join(APP_ROOT, "uart2_communications.log"))
     hw._uart_log_path = os.environ["UART_LOG_PATH"]
+    hw._config = getattr(hw, "_config", {}) or {}
+    hw._config["UART_LOG_PATH"] = os.environ["UART_LOG_PATH"]
+    hw._config["UART1_LOG_PATH"] = os.environ["UART1_LOG_PATH"]
+    hw._config["UART2_LOG_PATH"] = os.environ["UART2_LOG_PATH"]
     hw._config = {"ESP_PORT": os.environ.get("ESP_PORT", "/dev/serial0"), "ESP_BAUD": 9600}
     hw.reset_uart_log(reason="probe_start")
     serial_ok = False

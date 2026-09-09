@@ -24,8 +24,9 @@ Do **not** mix roles: recipe/test frames only on UART-1; temperature CSV only on
 2. ESP → Pi (ACK): usually `#PAYLOAD,ACK*` or echo of command plus `,ACK`
 3. Payload must **not** contain `#` or `*`
 4. Case: treat as case-insensitive; Pi sends uppercase keywords
-5. After a command that expects ACK, ESP must reply promptly (Pi timeout ~3 s)
-6. Async events (no prior poll) are allowed on UART-1 when hardware finishes an action (see §4)
+5. After a command that expects ACK, ESP must reply promptly (Pi timeout ~3–5 s per attempt)
+6. If ACK is missing or serial write fails, **Pi resends the same frame** (default **3 attempts**, ~0.35 s apart). Explicit ESP `ERR,…` replies are **not** retried.
+7. Async events (no prior poll) are allowed on UART-1 when hardware finishes an action (see §4)
 
 **ACK examples accepted by Pi:**
 - `#START-TEST,ACK*`

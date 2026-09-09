@@ -62,7 +62,12 @@ def init(app, config):
         or "/dev/serial0"
     )
     _baud = int(_config.get("ESP_CMD_BAUD") or _config.get("ESP_BAUD") or 9600)
-    _uart_log_path = str(_config.get("UART_LOG_PATH") or "")
+    _uart_log_path = str(
+        _config.get("UART1_LOG_PATH")
+        or _config.get("UART_CMD_LOG_PATH")
+        or _config.get("UART_LOG_PATH")
+        or ""
+    )
     env_sim = str(os.environ.get("SIMULATE_HARDWARE", "")).strip().lower() in ("1", "true", "yes", "on")
     _simulate = bool(_config.get("SIMULATE_HARDWARE")) or env_sim
     if not _simulate:
@@ -144,6 +149,13 @@ def _open_serial() -> bool:
     try:
         if not os.path.exists(_port_name) and not str(_port_name).upper().startswith("COM"):
             return False
+        # Re-open cleanly if a previous handle went bad.
+        if _ser is not None:
+            try:
+                _ser.close()
+            except Exception:
+                pass
+            _ser = None
         _ser = serial.Serial(port=_port_name, baudrate=_baud, timeout=0.2)
         return True
     except Exception as exc:
@@ -225,7 +237,41 @@ def _drain_pending(max_wait: float = 0.0) -> List[str]:
     return drained
 
 
-def _tx(frame: str, wait_ack: bool = True, timeout: float = 3.0, expect_prefix: Optional[str] = None) -> Dict[str, Any]:
+# Total TX attempts when ACK is missing / serial write fails (1 + retries).
+_TX_DEFAULT_ATTEMPTS = 3
+_TX_RETRY_DELAY_S = 0.35
+
+
+def _tx_attempts_from_config() -> int:
+    try:
+        n = int(_config.get("ESP_CMD_TX_ATTEMPTS") or os.environ.get("ESP_CMD_TX_ATTEMPTS") or _TX_DEFAULT_ATTEMPTS)
+    except (TypeError, ValueError):
+        n = _TX_DEFAULT_ATTEMPTS
+    return max(1, min(8, n))
+
+
+def _should_retry_tx(result: Dict[str, Any]) -> bool:
+    """Retry only on transport / missing-ACK failures, not ESP protocol rejects."""
+    if not result or result.get("ok"):
+        return False
+    ack = str(result.get("ack") or "")
+    if ack and proto.is_error_response(ack):
+        return False
+    err = str(result.get("error") or "").upper()
+    if "ERR," in err or err.startswith("ERR"):
+        # Explicit ESP error payload — do not blind-retry.
+        if "ACK TIMEOUT" not in err and "SERIAL" not in err:
+            return False
+    return True
+
+
+def _tx_once(
+    frame: str,
+    wait_ack: bool = True,
+    timeout: float = 3.0,
+    expect_prefix: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Send one UART frame and optionally wait for a matching ACK."""
     frame = frame if frame.startswith("#") else proto.wrap(frame)
     _log_uart("TX", frame)
     _drain_pending(0)
@@ -258,16 +304,75 @@ def _tx(frame: str, wait_ack: bool = True, timeout: float = 3.0, expect_prefix: 
             continue
         if proto.is_error_response(inner):
             return {"ok": False, "error": inner, "tx": frame, "ack": inner}
-        if expect_prefix and not proto.is_ack(inner, expect_prefix):
-            # keep looking unless it is clearly an ack for something else useful
-            if proto.is_ack(inner):
+        if expect_prefix:
+            if proto.is_ack(inner, expect_prefix):
                 return {"ok": True, "tx": frame, "ack": inner}
+            # Ignore stale / mismatched ACKs and keep waiting for the expected one.
             continue
-        if proto.is_ack(inner, expect_prefix):
-            return {"ok": True, "tx": frame, "ack": inner}
         if proto.is_ack(inner):
             return {"ok": True, "tx": frame, "ack": inner}
     return {"ok": False, "error": "ACK timeout", "tx": frame}
+
+
+def _tx(
+    frame: str,
+    wait_ack: bool = True,
+    timeout: float = 3.0,
+    expect_prefix: Optional[str] = None,
+    retries: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Send a command frame to the ESP and wait for ACK.
+
+    On ACK timeout or serial write failure, resend the same frame up to
+    ``retries`` extra times (default: ESP_CMD_TX_ATTEMPTS, usually 3 total).
+    ESP protocol errors (ERR,…) are not retried.
+    """
+    frame = frame if str(frame).startswith("#") else proto.wrap(frame)
+    if retries is None:
+        attempts = _tx_attempts_from_config()
+    else:
+        attempts = max(1, min(8, int(retries) + 1))
+
+    last: Dict[str, Any] = {"ok": False, "error": "TX not attempted", "tx": frame}
+    for attempt in range(1, attempts + 1):
+        last = _tx_once(frame, wait_ack=wait_ack, timeout=timeout, expect_prefix=expect_prefix)
+        if last.get("ok"):
+            if attempt > 1:
+                last["attempts"] = attempt
+                last["retried"] = True
+                if _logger:
+                    _logger.info(
+                        "[disso_cmd] TX OK after retry attempt %s/%s: %s",
+                        attempt,
+                        attempts,
+                        frame,
+                    )
+            return last
+
+        if attempt >= attempts or not _should_retry_tx(last):
+            last["attempts"] = attempt
+            return last
+
+        if _logger:
+            _logger.warning(
+                "[disso_cmd] TX/ACK failed (%s) — retrying %s/%s: %s",
+                last.get("error") or "unknown",
+                attempt + 1,
+                attempts,
+                frame,
+            )
+        _drain_pending(0.05)
+        # Serial may have dropped; try reopen before resend.
+        err_l = str(last.get("error") or "").lower()
+        if _ser is None or "serial" in err_l or "not open" in err_l:
+            try:
+                _open_serial()
+            except Exception:
+                pass
+        time.sleep(_TX_RETRY_DELAY_S)
+
+    return last
 
 
 def _simulate_handle_tx(frame: str) -> str:
@@ -480,6 +585,11 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
         time.sleep(0.15)
 
     recipe_ack = _wait_for_recipe_complete(timeout=5.0)
+    if not recipe_ack.get("ok") and "timeout" in str(recipe_ack.get("error") or "").lower():
+        # Final RECIPE,ACK sometimes arrives late or was missed — wait once more.
+        if _logger:
+            _logger.warning("[disso_cmd] RECIPE,ACK missing — waiting again")
+        recipe_ack = _wait_for_recipe_complete(timeout=4.0)
     results.append(recipe_ack)
     if not recipe_ack.get("ok"):
         return {
@@ -681,7 +791,16 @@ def stop_rpm(rpm: int = 0) -> Dict[str, Any]:
 
 
 def lift(action: str) -> Dict[str, Any]:
-    return _tx(proto.build_lift(action), expect_prefix="LF-CU")
+    a = (action or "").strip().lower()
+    if a == "up":
+        expect = "LF-CU-UP"
+    elif a == "down":
+        expect = "LF-CU-DOWN"
+    elif a == "stop":
+        expect = "LF-CU-STOP"
+    else:
+        return {"ok": False, "error": "lift action must be up|down|stop"}
+    return _tx(proto.build_lift(a), timeout=5.0, expect_prefix=expect)
 
 
 def clean(channel: str, volume_ml: float) -> Dict[str, Any]:

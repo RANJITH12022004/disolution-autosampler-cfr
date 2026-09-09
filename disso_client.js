@@ -45,7 +45,10 @@
         hideResumeModal();
         if (!res.ok || !(res.body && res.body.ok)) {
           if (typeof showAppModal === 'function') {
-            showAppModal((res.body && res.body.error) || 'Could not continue test.', 'Test');
+            var msg = (typeof window.friendlyHardwareError === 'function')
+              ? window.friendlyHardwareError((res.body && res.body.error) || '', 'Could not continue test.')
+              : ((res.body && res.body.error) || 'Could not continue test.');
+            showAppModal(msg, 'Test');
           }
           return;
         }
@@ -354,6 +357,52 @@
   window.dissoLift = function (action) {
     return api('/api/hardware/disso/lift/' + action, { method: 'POST' });
   };
+
+  var _eventsPollTimer = null;
+  var _eventsPollRef = 0;
+
+  function handleCmdEvents(events) {
+    if (!events || !events.length) return;
+    events.forEach(function (evt) {
+      if (!evt || !evt.type) return;
+      if (evt.type === 'LIFT-HOME') {
+        if (typeof window.applyShaftHomeFromEsp === 'function') {
+          window.applyShaftHomeFromEsp(evt);
+        }
+      }
+    });
+  }
+
+  function pollCmdEventsOnce() {
+    return api('/api/hardware/disso/events?clear=1').then(function (res) {
+      var events = (res && res.body && res.body.events) || [];
+      handleCmdEvents(events);
+      return events;
+    }).catch(function () { return []; });
+  }
+
+  function startCmdEventsPolling() {
+    _eventsPollRef += 1;
+    if (_eventsPollTimer) return;
+    pollCmdEventsOnce();
+    _eventsPollTimer = setInterval(function () {
+      pollCmdEventsOnce();
+    }, 500);
+  }
+
+  function stopCmdEventsPolling() {
+    _eventsPollRef = Math.max(0, _eventsPollRef - 1);
+    if (_eventsPollRef > 0) return;
+    if (_eventsPollTimer) {
+      clearInterval(_eventsPollTimer);
+      _eventsPollTimer = null;
+    }
+  }
+
+  window.dissoStartCmdEventsPolling = startCmdEventsPolling;
+  window.dissoStopCmdEventsPolling = stopCmdEventsPolling;
+  window.dissoPollCmdEventsNow = pollCmdEventsOnce;
+
   window.dissoFetchTemps = function (poll) {
     var q = (poll === false) ? '' : '?poll=1';
     return api('/api/hardware/disso/temperature/live' + q).then(function (res) {

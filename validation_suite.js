@@ -929,7 +929,7 @@
                 });
         }).catch(function (err) {
             _tempCalPhase = 'ready';
-            setTempCalStatus((err && err.message) || 'Calibration failed.', 'is-error');
+            setTempCalStatus(friendlyHardwareError(err, 'Calibration failed. Try again.'), 'is-error');
             if (btn) {
                 btn.disabled = false;
                 btn.textContent = 'Calibrate';
@@ -1024,7 +1024,7 @@
             _svPhase = 'idle';
             setSvPrimary('Start', false);
             setSvStatus('Ready');
-            showAppModal((err && err.message) || 'Start failed.', 'Sample Volume');
+            showAppModal(friendlyHardwareError(err, 'Could not start sample volume test. Try again.'), 'Sample Volume');
         });
     }
 
@@ -1038,7 +1038,7 @@
             _svPhase = 'idle';
             setSvPrimary('Start', false);
             setSvStatus('Timeout waiting for sampler.');
-            showAppModal('Timed out waiting for ESP ready signal. Try Start again.', 'Sample Volume');
+            showAppModal('Timed out waiting for sampler ready. Try Start again.', 'Sample Volume');
             return;
         }
         apiRequest(API_BASE + '/api/hardware/disso/events').then(function (data) {

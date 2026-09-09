@@ -60,7 +60,11 @@ def init(app, config):
     _logger = getattr(app, "logger", None)
     _port_name = _config.get("ESP_TEMP_PORT") or os.environ.get("ESP_TEMP_PORT") or "/dev/ttyAMA3"
     _baud = int(_config.get("ESP_TEMP_BAUD") or os.environ.get("ESP_TEMP_BAUD") or 9600)
-    _uart_log_path = str(_config.get("UART_LOG_PATH") or "")
+    _uart_log_path = str(
+        _config.get("UART2_LOG_PATH")
+        or _config.get("UART_TEMP_LOG_PATH")
+        or ""
+    )
     env_sim = str(os.environ.get("SIMULATE_HARDWARE", "")).strip().lower() in ("1", "true", "yes", "on")
     _simulate = bool(_config.get("SIMULATE_HARDWARE")) or env_sim
     if cmd_hw is not None and cmd_hw.is_simulate():

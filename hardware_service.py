@@ -34,7 +34,8 @@ _uart_log_lock = threading.Lock()
 _live_state_lock = threading.Lock()
 _uart_log_path = ""
 _boot_marker_path = ""
-DEFAULT_UART_LOG = "/opt/kiosk/uart_communications.log"
+DEFAULT_UART_LOG = "/opt/kiosk/uart1_communications.log"
+DEFAULT_UART2_LOG = "/opt/kiosk/uart2_communications.log"
 _live_state = {
     "running": False,
     "rotationCount": 0,
@@ -1201,8 +1202,37 @@ def _append_uart_log(
             _logger.warning("UART log write failed (%s): %s", path, e)
 
 
-def get_uart_log_tail(max_lines: int = 500) -> dict:
-    path = _uart_log_path or DEFAULT_UART_LOG
+def _uart_log_paths() -> list:
+    """UART-1 (command) and UART-2 (temperature) log files."""
+    p1 = (
+        (_config or {}).get("UART1_LOG_PATH")
+        or (_config or {}).get("UART_CMD_LOG_PATH")
+        or _uart_log_path
+        or DEFAULT_UART_LOG
+    )
+    p2 = (
+        (_config or {}).get("UART2_LOG_PATH")
+        or (_config or {}).get("UART_TEMP_LOG_PATH")
+        or DEFAULT_UART2_LOG
+    )
+    out = []
+    for p in (p1, p2):
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def _resolve_uart_log_path(channel: Optional[str] = None) -> str:
+    """channel: 1/cmd (default), 2/temp."""
+    ch = str(channel or "1").strip().lower()
+    paths = _uart_log_paths()
+    if ch in ("2", "temp", "temperature", "uart2"):
+        return paths[1] if len(paths) > 1 else (paths[0] if paths else DEFAULT_UART2_LOG)
+    return paths[0] if paths else DEFAULT_UART_LOG
+
+
+def get_uart_log_tail(max_lines: int = 500, channel: Optional[str] = None) -> dict:
+    path = _resolve_uart_log_path(channel)
     max_lines = max(1, min(int(max_lines or 500), 5000))
     lines = []
     try:
@@ -1210,21 +1240,39 @@ def get_uart_log_tail(max_lines: int = 500) -> dict:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
     except Exception as e:
-        return {"ok": False, "error": str(e), "path": path}
+        return {"ok": False, "error": str(e), "path": path, "channel": str(channel or "1")}
     tail = [ln.rstrip("\n") for ln in lines[-max_lines:]]
-    return {"ok": True, "path": path, "lines": tail, "count": len(tail)}
+    return {
+        "ok": True,
+        "path": path,
+        "channel": str(channel or "1"),
+        "lines": tail,
+        "count": len(tail),
+        "paths": {"uart1": _resolve_uart_log_path("1"), "uart2": _resolve_uart_log_path("2")},
+    }
 
 
-def reset_uart_log(reason: str = "manual"):
-    path = _uart_log_path or DEFAULT_UART_LOG
+def reset_uart_log(reason: str = "manual", channel: Optional[str] = None):
+    """Reset one channel, or both when channel is None / all."""
     ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+    ch = str(channel or "all").strip().lower()
+    if ch in ("all", "*", "both", ""):
+        targets = _uart_log_paths()
+    else:
+        targets = [_resolve_uart_log_path(ch)]
+    reset_paths = []
     try:
-        log_dir = os.path.dirname(path)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
         with _uart_log_lock:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(f"{ts} [SYSTEM] UART log reset ({reason})\n")
-        return {"ok": True, "path": path}
+            for path in targets:
+                log_dir = os.path.dirname(path)
+                if log_dir:
+                    os.makedirs(log_dir, exist_ok=True)
+                label = "UART-1 (CMD)" if path == _resolve_uart_log_path("1") else "UART-2 (TEMP)"
+                if len(targets) == 1:
+                    label = "UART"
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(f"{ts} [SYSTEM] {label} log reset ({reason})\n")
+                reset_paths.append(path)
+        return {"ok": True, "path": reset_paths[0] if reset_paths else None, "paths": reset_paths}
     except Exception as e:
-        return {"ok": False, "error": str(e), "path": path}
+        return {"ok": False, "error": str(e), "paths": reset_paths}

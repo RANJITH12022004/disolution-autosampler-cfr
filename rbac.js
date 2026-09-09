@@ -185,6 +185,7 @@ var SCREEN_FEATURE_MAP = {
   'system-info': 'settings',
   'hardware-init': 'settings',
   'heater-control': 'settings',
+  'shaft-control': 'settings',
   'cleaning-cycle': 'cleaning-cycle',
   'ip-config': 'settings',
   'ip-config-result': 'settings',

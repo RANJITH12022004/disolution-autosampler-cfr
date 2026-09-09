@@ -355,6 +355,7 @@ var PAGE_AUDIT_LABELS = {
     'ip-config-result': 'IP Config',
     'hardware-init': 'Hardware Initialise',
     'heater-control': 'Heater',
+    'shaft-control': 'Shaft Controls',
     calibration: 'Calibration',
     'calibration-type-select': 'Select Calibration Type',
     'load-calibration': 'Load Calibration',
@@ -607,6 +608,77 @@ function isEditableTarget(el) {
     var t = String(el.type || 'text').toLowerCase();
     return t !== 'button' && t !== 'checkbox' && t !== 'radio' && t !== 'submit' && t !== 'reset';
 }
+
+/**
+ * Map backend / ESP protocol errors to commercial operator language.
+ * Never show #frames*, ACK, or command names on the kiosk UI.
+ */
+function friendlyHardwareError(errOrMsg, fallback) {
+    var raw = '';
+    if (errOrMsg == null) raw = '';
+    else if (typeof errOrMsg === 'string') raw = errOrMsg;
+    else if (errOrMsg.message) raw = String(errOrMsg.message);
+    else if (errOrMsg.error) raw = String(errOrMsg.error);
+    else raw = String(errOrMsg);
+    raw = raw.trim();
+    var fb = fallback || 'Hardware did not respond. Try again.';
+    if (!raw) return fb;
+    var u = raw.toUpperCase();
+    // Already friendly product copy — pass through if no protocol markers.
+    if (u.indexOf('#') < 0 && u.indexOf('ACK') < 0 && u.indexOf('SET-TEMP') < 0 &&
+        u.indexOf('PRE-HEAT') < 0 && u.indexOf('PRE-DONE') < 0 && u.indexOf('START-PLD') < 0 &&
+        u.indexOf('STOP-HEAT') < 0 && u.indexOf('START-TEST') < 0 && u.indexOf('ERR,') < 0 &&
+        u.indexOf('LF-CU') < 0 && !/\bINIT\b/.test(u) && !/TIMEOUT/.test(u)) {
+        return raw;
+    }
+    if (/LIFT|COLUMN|POSITION/.test(u)) {
+        return 'Lifting column is not in position. Move the shaft Down, then try again.';
+    }
+    if (/PRE-HEAT|PRE-DONE|SET-TEMP|STOP-HEAT/.test(u)) {
+        return 'Heating command failed. Try again.';
+    }
+    if (/START-PLD|STOP-PLD|START-RPM|STOP-RPM/.test(u)) {
+        return 'Could not start stirrer. Try again.';
+    }
+    if (/LF-CU|LF-CL-HOME/.test(u)) {
+        return 'Shaft move failed. Try again.';
+    }
+    if (/#INIT\b|INIT,ACK|\bINIT\*/.test(u) || u === 'INIT' || u.indexOf('INIT ACK') >= 0) {
+        return 'Hardware initialise failed. Try again.';
+    }
+    if (/RECIPE|ERR,RCP/.test(u)) {
+        return 'Recipe prepare failed. Try again.';
+    }
+    if (/ACK|TIMEOUT|SERIAL|NOT OPEN/.test(u)) {
+        return fb;
+    }
+    if (/#/.test(raw) || /,ACK/.test(u)) {
+        return fb;
+    }
+    return fb;
+}
+window.friendlyHardwareError = friendlyHardwareError;
+
+/**
+ * Map biometric/sensor errors to plain operator language (no ports, hex, checksums).
+ */
+function friendlyBiometricError(errOrMsg, fallback) {
+    var raw = '';
+    if (errOrMsg == null) raw = '';
+    else if (typeof errOrMsg === 'string') raw = errOrMsg;
+    else if (errOrMsg.message) raw = String(errOrMsg.message);
+    else if (errOrMsg.error) raw = String(errOrMsg.error);
+    else raw = String(errOrMsg);
+    raw = raw.trim();
+    var fb = fallback || 'Fingerprint sensor error. Try again.';
+    if (!raw) return fb;
+    if (/cancelled/i.test(raw)) return 'cancelled';
+    if (/tty|AMA5?|checksum|packet|header|EF\s*01|0x[0-9a-f]|\/dev\//i.test(raw)) {
+        return fb;
+    }
+    return raw;
+}
+window.friendlyBiometricError = friendlyBiometricError;
 
 function isDissolutionTestActive() {
     // Lock navigation only after Start (running / paused).
@@ -1904,6 +1976,7 @@ var PAGE_TITLES = {
     'cleaning-cycle': 'Cleaning Cycle',
     'hardware-init': 'Hardware Initialise',
     'heater-control': 'Heater',
+    'shaft-control': 'Shaft Controls',
     'datetime': 'Date and Time',
     'factory-settings': 'Factory Settings',
     'reports': 'Reports',
@@ -2507,6 +2580,14 @@ function goToPage(pageName) {
         typeof cleanupHeaterControlOnLeave === 'function') {
         cleanupHeaterControlOnLeave();
     }
+    if (prevPage === 'shaft-control' && pageName !== 'shaft-control' &&
+        typeof cleanupShaftControlOnLeave === 'function') {
+        cleanupShaftControlOnLeave();
+    }
+    if (prevPage === 'shaft-position' && pageName !== 'shaft-position' && pageName !== 'test-run' &&
+        pageName !== 'shaft-control' && typeof _shaftDisarmEventsPoll === 'function') {
+        _shaftDisarmEventsPoll();
+    }
     if (prevPage === 'system-info' && pageName !== 'system-info' && pageName !== 'vessel-temperature') {
         if (typeof window.dissoDisarmAutoTemp === 'function') {
             window.dissoDisarmAutoTemp('leave-system-info');
@@ -2637,7 +2718,7 @@ function goToPage(pageName) {
         pageName === 'system-settings' ||
         pageName === 'wakeup-schedule' || pageName === 'system-info' ||
         pageName === 'cleaning-cycle' || pageName === 'hardware-init' ||
-        pageName === 'heater-control' ||
+        pageName === 'heater-control' || pageName === 'shaft-control' ||
         pageName === 'ip-config' || pageName === 'ip-config-result') {
         navActivePage = 'settings';
     }
@@ -2730,6 +2811,17 @@ function goToPage(pageName) {
         setTimeout(function () {
             if (typeof initHeaterControlPage === 'function') initHeaterControlPage();
         }, 50);
+    }
+    if (pageName === 'shaft-control') {
+        setTimeout(function () {
+            if (typeof initShaftControlPage === 'function') initShaftControlPage();
+        }, 50);
+    }
+    if (pageName === 'shaft-position') {
+        setTimeout(function () {
+            if (typeof _shaftArmEventsPoll === 'function') _shaftArmEventsPoll();
+            if (typeof _shaftApplyDisabledFlags === 'function') _shaftApplyDisabledFlags();
+        }, 40);
     }
     if (pageName === 'ip-config') {
         setTimeout(function () {
@@ -2906,6 +2998,9 @@ function goBack() {
         goToPage('settings');
     } else if (pageId === 'page-heater-control') {
         if (typeof cleanupHeaterControlOnLeave === 'function') cleanupHeaterControlOnLeave();
+        goToPage('settings');
+    } else if (pageId === 'page-shaft-control') {
+        if (typeof cleanupShaftControlOnLeave === 'function') cleanupShaftControlOnLeave();
         goToPage('settings');
     } else if (pageId === 'page-factory-settings') {
         goToPage('settings');
@@ -3182,11 +3277,14 @@ function loginBiometric() {
             showMandatoryPasswordResetScreen(data.username);
             return;
         }
-        var msg = (data && data.error) ? String(data.error) : 'Biometric login failed.';
+        var msg = friendlyBiometricError(
+            (data && data.error) ? data.error : '',
+            'Fingerprint login failed. Try again.'
+        );
         showAppModal(msg, 'Biometric Login');
     }).catch(function (err) {
         if (err && err.name === 'AbortError') return;
-        showAppModal('Biometric login failed: ' + (err && err.message ? err.message : 'Network error'), 'Biometric Login');
+        showAppModal('Biometric login failed. Check the sensor and try again.', 'Biometric Login');
     }).finally(function () {
         hideBiometricProgressOverlay();
         window._loginBiometricInFlight = false;
@@ -3341,12 +3439,18 @@ function runBiometricVerifyWithRetry(opts) {
                     finish({ ok: true, token: String(data.token) });
                     return;
                 }
-                lastError = (data && data.error) ? String(data.error) : 'Fingerprint verification failed.';
+                lastError = friendlyBiometricError(
+                    (data && data.error) ? data.error : '',
+                    'Fingerprint verification failed. Try again.'
+                );
                 showBiometricVerifyFailedOverlay(lastError, opts.failureHint);
                 window._biometricVerifyRetryFn = attempt;
             }).catch(function (err) {
                 if (cancelled) return;
-                lastError = 'Fingerprint verification failed: ' + (err && err.message ? err.message : 'Error');
+                lastError = friendlyBiometricError(
+                    err,
+                    'Fingerprint verification failed. Try again.'
+                );
                 showBiometricVerifyFailedOverlay(lastError, opts.failureHint);
                 window._biometricVerifyRetryFn = attempt;
             });
@@ -3432,7 +3536,10 @@ function enrollMemberBiometric() {
         if (_biometricEnrollCancelled) return;
         if (!data || !data.ok) {
             hideBiometricProgressOverlay();
-            showAppModal((data && data.error) || 'First scan failed.', 'Register Fingerprint');
+            showAppModal(
+                friendlyBiometricError((data && data.error) || '', 'First scan failed. Try again.'),
+                'Register Fingerprint'
+            );
             return;
         }
         showBiometricEnrollUi({
@@ -3462,7 +3569,10 @@ function enrollMemberBiometric() {
         if (!data) return;
         if (!data.ok) {
             hideBiometricProgressOverlay();
-            showAppModal((data && data.error) || 'Second scan failed.', 'Register Fingerprint');
+            showAppModal(
+                friendlyBiometricError((data && data.error) || '', 'Second scan failed. Try again.'),
+                'Register Fingerprint'
+            );
             return;
         }
         showBiometricEnrollUi({
@@ -3500,7 +3610,10 @@ function enrollMemberBiometric() {
     }).catch(function (err) {
         if (_biometricEnrollCancelled) return;
         hideBiometricProgressOverlay();
-        showAppModal('Fingerprint enrollment failed: ' + (err && err.message ? err.message : 'Network error'), 'Register Fingerprint');
+        showAppModal(
+            friendlyBiometricError(err, 'Fingerprint enrollment failed. Try again.'),
+            'Register Fingerprint'
+        );
     });
 }
 
@@ -4425,14 +4538,14 @@ function startRpmValidationMotor() {
     }).then(function (result) {
         if (startBtn) startBtn.disabled = false;
         if (!result || result.ok === false) {
-            showAppModal((result && result.error) || 'Failed to start arm motor (START-PLD).', 'RPM Validation');
+            showAppModal(friendlyHardwareError((result && result.error) || '', 'Could not start stirrer. Try again.'), 'RPM Validation');
             return;
         }
         window._rpmValMotorRunning = true;
         window._rpmValMotorRpm = target;
     }).catch(function (err) {
         if (startBtn) startBtn.disabled = false;
-        showAppModal((err && err.message) || 'Failed to start arm motor.', 'RPM Validation');
+        showAppModal(friendlyHardwareError(err, 'Could not start stirrer. Try again.'), 'RPM Validation');
     });
 }
 
@@ -4456,78 +4569,7 @@ function stopRpmValidationMotor() {
 var _rpmValShaftUpTimerId = null;
 var _rpmValShaftState = { upDisabled: false, downDisabled: false, cmd: 'stop' };
 
-function _rpmValClearShaftTimers() {
-    if (_rpmValShaftUpTimerId != null) {
-        clearTimeout(_rpmValShaftUpTimerId);
-        _rpmValShaftUpTimerId = null;
-    }
-}
-
-function _rpmValResetShaftButtons() {
-    _rpmValClearShaftTimers();
-    _rpmValShaftState = { upDisabled: false, downDisabled: false, cmd: 'stop' };
-    ['rpm-val-shaft-up', 'rpm-val-shaft-stop', 'rpm-val-shaft-down'].forEach(function (id) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.disabled = false;
-        el.classList.toggle('is-active', id === 'rpm-val-shaft-stop');
-    });
-    var statusEl = document.getElementById('rpm-val-shaft-status');
-    if (statusEl) statusEl.textContent = 'Stopped';
-}
-
-function rpmValShaftCommand(cmd) {
-    if (cmd !== 'up' && cmd !== 'down' && cmd !== 'stop') return;
-    if (cmd === 'up' && _rpmValShaftState.upDisabled) return;
-    if (cmd === 'down' && _rpmValShaftState.downDisabled) return;
-
-    _rpmValShaftState.cmd = cmd;
-    var labels = { up: 'Raising', down: 'Lowering', stop: 'Stopped' };
-    var statusEl = document.getElementById('rpm-val-shaft-status');
-    if (statusEl) statusEl.textContent = labels[cmd] || 'Stopped';
-    var map = { up: 'rpm-val-shaft-up', stop: 'rpm-val-shaft-stop', down: 'rpm-val-shaft-down' };
-    Object.keys(map).forEach(function (key) {
-        var el = document.getElementById(map[key]);
-        if (el) el.classList.toggle('is-active', key === cmd);
-    });
-
-    if (typeof window.dissoLift === 'function') {
-        window.dissoLift(cmd).then(function (res) {
-            var body = (res && res.body) ? res.body : res;
-            var ok = !!(res && res.ok !== false) && !(body && body.ok === false);
-            if (!ok) return res;
-            if (cmd === 'down') {
-                _rpmValShaftState.downDisabled = true;
-                var downEl = document.getElementById('rpm-val-shaft-down');
-                if (downEl) {
-                    downEl.disabled = true;
-                    downEl.classList.remove('is-active');
-                }
-                if (statusEl) statusEl.textContent = 'Down (home)';
-            }
-            if (cmd === 'up') {
-                _rpmValClearShaftTimers();
-                _rpmValShaftUpTimerId = setTimeout(function () {
-                    _rpmValShaftUpTimerId = null;
-                    _rpmValShaftState.upDisabled = true;
-                    var upEl = document.getElementById('rpm-val-shaft-up');
-                    if (upEl) {
-                        upEl.disabled = true;
-                        upEl.classList.remove('is-active');
-                    }
-                    var st = document.getElementById('rpm-val-shaft-status');
-                    if (st) st.textContent = 'Up';
-                }, 20000);
-            }
-            if (cmd === 'stop') {
-                _rpmValClearShaftTimers();
-            }
-            return res;
-        }).catch(function () {});
-    } else if (cmd === 'stop') {
-        _rpmValClearShaftTimers();
-    }
-}
+/* Shaft Up/Stop/Down for RPM validation uses shared shaftUnitCommand (see stirrerUnitCommand). */
 
 var _rpmValRunTimerId = null;
 var _rpmValRunLeft = 60;
@@ -4788,7 +4830,7 @@ function runRpmValidation() {
             body: { rpm: Math.round(target) }
         }).then(function (result) {
             if (!result || result.ok === false) {
-                throw new Error((result && result.error) || 'START-PLD failed');
+                throw new Error((result && result.error) || 'Could not start stirrer.');
             }
             window._rpmValMotorRunning = true;
             window._rpmValMotorRpm = Math.round(target);
@@ -4796,7 +4838,7 @@ function runRpmValidation() {
         });
     }
     motorChain.then(finishValidation).catch(function (err) {
-        showAppModal((err && err.message) || 'Arm motor command failed.', 'RPM Validation');
+        showAppModal(friendlyHardwareError(err, 'Could not start stirrer. Try again.'), 'RPM Validation');
     });
 }
 
@@ -11397,6 +11439,32 @@ function openHeaterControlPage() {
     goToPage('heater-control');
 }
 
+function openShaftControlPage() {
+    if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
+        showAppModal('Finish or abort the dissolution test before using shaft controls.', 'Shaft Controls');
+        return;
+    }
+    goToPage('shaft-control');
+}
+
+function initShaftControlPage() {
+    _shaftArmEventsPoll();
+    _shaftApplyDisabledFlags();
+    var st = document.getElementById('settings-shaft-status');
+    if (st && (!_shaftMotion || _shaftMotion === 'stop')) st.textContent = 'Stopped';
+}
+
+function cleanupShaftControlOnLeave() {
+    var active = typeof getActivePageName === 'function' ? getActivePageName() : '';
+    if (active !== 'shaft-position' && active !== 'shaft-control') {
+        _shaftDisarmEventsPoll();
+    }
+}
+
+function settingsShaftCommand(cmd) {
+    shaftUnitCommand(cmd, { blockWhileTest: true, fromSettings: true });
+}
+
 function _heaterCtrlReadTemp() {
     var el = document.getElementById('heater-ctrl-temp');
     if (!el) return NaN;
@@ -11471,7 +11539,7 @@ function initHeaterControlPage() {
     _heaterCtrlAborted = false;
     _heaterCtrlBusy = false;
     _heaterCtrlSetUiOn(false);
-    _heaterCtrlSetStatus('Set temperature, then turn the heater ON to send commands to the ESP.');
+    _heaterCtrlSetStatus('Set temperature, then turn the heater ON.');
     var tempEl = document.getElementById('heater-ctrl-temp');
     if (tempEl && !String(tempEl.value || '').trim()) tempEl.value = '37.0';
     if (_heaterCtrlPollId) clearInterval(_heaterCtrlPollId);
@@ -11487,15 +11555,15 @@ function applyHeaterControlTemp() {
     var t = _heaterCtrlValidateTemp();
     if (t == null) return;
     if (typeof window.dissoSetTemp !== 'function') {
-        showAppModal('Heater API unavailable.', 'Heater');
+        showAppModal('Heater control is unavailable.', 'Heater');
         return;
     }
     _heaterCtrlSetBusy(true);
-    _heaterCtrlSetStatus('Sending #SET-TEMP-' + t.toFixed(1) + '* …', 'busy');
+    _heaterCtrlSetStatus('Setting temperature…', 'busy');
     window.dissoSetTemp(t).then(function () {
         if (_heaterCtrlAborted) return;
         _heaterCtrlSetBusy(false);
-        _heaterCtrlSetStatus('Set temperature ' + t.toFixed(1) + ' °C acknowledged by ESP.', 'ok');
+        _heaterCtrlSetStatus('Temperature set to ' + t.toFixed(1) + ' °C.', 'ok');
         if (typeof logAuditEvent === 'function') {
             logAuditEvent('Heater set temp', t.toFixed(1) + ' C', {
                 eventType: 'lifecycle', entityType: 'settings'
@@ -11504,7 +11572,7 @@ function applyHeaterControlTemp() {
     }).catch(function (err) {
         if (_heaterCtrlAborted) return;
         _heaterCtrlSetBusy(false);
-        var msg = (err && err.message) ? String(err.message) : 'Set temperature failed';
+        var msg = friendlyHardwareError(err, 'Could not set temperature. Try again.');
         _heaterCtrlSetStatus(msg, 'fail');
         showAppModal(msg, 'Heater');
     });
@@ -11520,18 +11588,18 @@ function setHeaterControlPower(on) {
         var t = _heaterCtrlValidateTemp();
         if (t == null) return;
         if (typeof window.dissoHeaterOn !== 'function') {
-            showAppModal('Heater API unavailable.', 'Heater');
+            showAppModal('Heater control is unavailable.', 'Heater');
             return;
         }
         _heaterCtrlSetBusy(true);
-        _heaterCtrlSetStatus('Sending SET-TEMP + PRE-HEAT …', 'busy');
+        _heaterCtrlSetStatus('Starting heater…', 'busy');
         window.dissoHeaterOn(t, { waitDone: false }).then(function () {
             if (_heaterCtrlAborted) return;
             _heaterCtrlSetBusy(false);
             _heaterCtrlSetUiOn(true);
             _heaterCtrlSetStatus('Heater ON — heating to ' + t.toFixed(1) + ' °C.', 'ok');
             if (typeof logAuditEvent === 'function') {
-                logAuditEvent('Heater on', 'SET-TEMP ' + t.toFixed(1) + ' + PRE-HEAT', {
+                logAuditEvent('Heater on', 'Heater turned on at ' + t.toFixed(1) + ' C', {
                     eventType: 'lifecycle', entityType: 'settings'
                 });
             }
@@ -11539,32 +11607,32 @@ function setHeaterControlPower(on) {
             if (_heaterCtrlAborted) return;
             _heaterCtrlSetBusy(false);
             _heaterCtrlSetUiOn(false);
-            var msg = (err && err.message) ? String(err.message) : 'Heater on failed';
+            var msg = friendlyHardwareError(err, 'Could not start heating. Try again.');
             _heaterCtrlSetStatus(msg, 'fail');
             showAppModal(msg, 'Heater');
         });
         return;
     }
     if (typeof window.dissoHeaterOff !== 'function') {
-        showAppModal('Heater API unavailable.', 'Heater');
+        showAppModal('Heater control is unavailable.', 'Heater');
         return;
     }
     _heaterCtrlSetBusy(true);
-    _heaterCtrlSetStatus('Sending #STOP-HEAT* …', 'busy');
+    _heaterCtrlSetStatus('Stopping heater…', 'busy');
     window.dissoHeaterOff().then(function () {
         if (_heaterCtrlAborted) return;
         _heaterCtrlSetBusy(false);
         _heaterCtrlSetUiOn(false);
         _heaterCtrlSetStatus('Heater OFF.', 'ok');
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Heater off', 'STOP-HEAT', {
+            logAuditEvent('Heater off', 'Heater turned off', {
                 eventType: 'lifecycle', entityType: 'settings'
             });
         }
     }).catch(function (err) {
         if (_heaterCtrlAborted) return;
         _heaterCtrlSetBusy(false);
-        var msg = (err && err.message) ? String(err.message) : 'Heater off failed';
+        var msg = friendlyHardwareError(err, 'Could not stop heater. Try again.');
         _heaterCtrlSetStatus(msg, 'fail');
         showAppModal(msg, 'Heater');
     });
@@ -11591,7 +11659,7 @@ function _hwInitSetUi(phaseText, detailText, opts) {
 function initHardwareInitPage() {
     _hwInitAborted = false;
     _hwInitBusy = false;
-    _hwInitSetUi('Ready', 'Press Initialize to send #INIT* to the ESP.', {
+    _hwInitSetUi('Ready', 'Press Initialize to reset hardware to a safe idle state.', {
         disableStart: false,
         enableDone: false
     });
@@ -11605,14 +11673,14 @@ function startHardwareInitialise() {
     }
     _hwInitBusy = true;
     _hwInitAborted = false;
-    _hwInitSetUi('Initializing…', 'Waiting for #INIT,ACK* from ESP.', {
+    _hwInitSetUi('Initializing…', 'Waiting for hardware…', {
         busy: true,
         disableStart: true,
         enableDone: false
     });
     if (typeof apiRequest !== 'function') {
         _hwInitBusy = false;
-        _hwInitSetUi('Failed', 'API unavailable', { fail: true, disableStart: false, enableDone: true });
+        _hwInitSetUi('Failed', 'Hardware control is unavailable.', { fail: true, disableStart: false, enableDone: true });
         return;
     }
     apiRequest(API_BASE + '/api/hardware/disso/init', { method: 'POST', body: {} })
@@ -11626,12 +11694,12 @@ function startHardwareInitialise() {
                     enableDone: true
                 });
                 if (typeof logAuditEvent === 'function') {
-                    logAuditEvent('Hardware initialised', 'INIT ACK', {
+                    logAuditEvent('Hardware initialised', 'Hardware initialise completed', {
                         eventType: 'lifecycle', entityType: 'settings'
                     });
                 }
             } else {
-                _hwInitSetUi('Failed', (result && result.error) || 'Hardware initialise failed.', {
+                _hwInitSetUi('Failed', friendlyHardwareError((result && result.error) || '', 'Hardware initialise failed. Try again.'), {
                     fail: true,
                     disableStart: false,
                     enableDone: true
@@ -11641,8 +11709,8 @@ function startHardwareInitialise() {
         .catch(function (err) {
             if (_hwInitAborted) return;
             _hwInitBusy = false;
-            var msg = (err && err.message) ? err.message : 'Hardware initialise request failed.';
-            if (err && err.body && err.body.error) msg = err.body.error;
+            var msg = friendlyHardwareError(err, 'Hardware initialise failed. Try again.');
+            if (err && err.body && err.body.error) msg = friendlyHardwareError(err.body.error, msg);
             _hwInitSetUi('Failed', msg, { fail: true, disableStart: false, enableDone: true });
         });
 }
@@ -12132,7 +12200,7 @@ function runTemperatureCalibration() {
     }).catch(function (err) {
         _tempCalRunning = false;
         updateTemperatureCalibrationUI();
-        var msg = (err && err.message) ? err.message : 'Calibration request failed. Check hardware connection.';
+        var msg = friendlyHardwareError(err, 'Calibration failed. Check the sensor connection and try again.');
         setTempCalStatus(msg, 'is-error');
     });
 }
@@ -12444,7 +12512,7 @@ function dissolutionPreheatStart() {
             window.dissoBeep(1);
         }
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Preheat complete', 'ESP reached set temperature (PRE-DONE)', { eventType: 'lifecycle' });
+            logAuditEvent('Preheat complete', 'Preheat reached set temperature', { eventType: 'lifecycle' });
         }
     }
     if (!preheatFn) {
@@ -12464,7 +12532,7 @@ function dissolutionPreheatStart() {
         if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
         if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
         _dtSetStatus('Preheat failed', 'aborted');
-        showAppModal((err && err.message) || 'Preheat failed (PRE-HEAT / PRE-DONE).', 'Preheat');
+        showAppModal(friendlyHardwareError(err, 'Preheat failed. Try again.'), 'Preheat');
     });
 }
 
@@ -12700,6 +12768,9 @@ function dissolutionTestPrimaryAction() {
 
 var _stirrerUnitState = 'stop';
 var _dtShaftUpTimerId = null;
+var _shaftCmdSeq = 0;
+var _shaftMotion = 'stop'; // stop | raising | lowering | home
+var _shaftEventsArmed = false;
 
 function _dtClearShaftTimers() {
     if (_dtShaftUpTimerId != null) {
@@ -12708,114 +12779,274 @@ function _dtClearShaftTimers() {
     }
 }
 
+function _shaftUiTargets() {
+    return [
+        {
+            up: 'dt-stirrer-up',
+            stop: 'dt-stirrer-stop',
+            down: 'dt-stirrer-down',
+            status: 'dt-stirrer-status'
+        },
+        {
+            up: 'settings-shaft-up',
+            stop: 'settings-shaft-stop',
+            down: 'settings-shaft-down',
+            status: 'settings-shaft-status'
+        },
+        {
+            up: 'rpm-val-shaft-up',
+            stop: 'rpm-val-shaft-stop',
+            down: 'rpm-val-shaft-down',
+            status: 'rpm-val-shaft-status'
+        }
+    ];
+}
+
+function _shaftSetStatusAll(text) {
+    _shaftUiTargets().forEach(function (t) {
+        var el = document.getElementById(t.status);
+        if (el) el.textContent = text;
+    });
+}
+
+function _shaftSetActiveAll(cmd) {
+    _shaftUiTargets().forEach(function (t) {
+        ['up', 'stop', 'down'].forEach(function (key) {
+            var el = document.getElementById(t[key]);
+            if (el) el.classList.toggle('is-active', key === cmd);
+        });
+    });
+}
+
+function _shaftApplyDisabledFlags() {
+    var dt = _dissolutionTest;
+    var testLocked = !!(dt && (dt.running || dt.paused || dt.preheating));
+    var upDisabled = !!(dt && dt.shaftUpDisabled) || !!(_rpmValShaftState && _rpmValShaftState.upDisabled);
+    var downDisabled = !!(dt && dt.shaftDownDisabled) || !!(_rpmValShaftState && _rpmValShaftState.downDisabled);
+    // At home: Down latched until operator raises or stops mid-travel after re-enable via Stop/Up.
+    if (_shaftMotion === 'home') downDisabled = true;
+
+    _shaftUiTargets().forEach(function (t) {
+        var isDt = t.up === 'dt-stirrer-up';
+        var locked = isDt && testLocked;
+        ['up', 'stop', 'down'].forEach(function (key) {
+            var el = document.getElementById(t[key]);
+            if (!el) return;
+            if (locked) {
+                el.disabled = true;
+                return;
+            }
+            if (key === 'stop') {
+                el.disabled = false;
+                return;
+            }
+            if (key === 'up' && upDisabled) {
+                el.disabled = true;
+                return;
+            }
+            if (key === 'down' && downDisabled) {
+                el.disabled = true;
+                return;
+            }
+            el.disabled = false;
+        });
+    });
+}
+
+function _shaftArmEventsPoll() {
+    if (_shaftEventsArmed) return;
+    _shaftEventsArmed = true;
+    if (typeof window.dissoStartCmdEventsPolling === 'function') {
+        window.dissoStartCmdEventsPolling();
+    }
+}
+
+function _shaftDisarmEventsPoll() {
+    if (!_shaftEventsArmed) return;
+    _shaftEventsArmed = false;
+    if (typeof window.dissoStopCmdEventsPolling === 'function') {
+        window.dissoStopCmdEventsPolling();
+    }
+}
+
 function _dtResetShaftButtons() {
     _dtClearShaftTimers();
+    _shaftMotion = 'stop';
+    _stirrerUnitState = 'stop';
     var dt = _dissolutionTest;
     if (dt) {
         dt.shaftUpDisabled = false;
         dt.shaftDownDisabled = false;
     }
-    ['dt-stirrer-up', 'dt-stirrer-stop', 'dt-stirrer-down'].forEach(function (id) {
-        var el = _dtEl(id);
-        if (!el) return;
-        el.disabled = false;
-        el.classList.remove('is-shaft-locked');
-    });
-    var stopEl = _dtEl('dt-stirrer-stop');
-    if (stopEl) stopEl.classList.add('is-active');
-    ['dt-stirrer-up', 'dt-stirrer-down'].forEach(function (id) {
-        var el = _dtEl(id);
-        if (el) el.classList.remove('is-active');
-    });
-    var statusEl = _dtEl('dt-stirrer-status');
-    if (statusEl) statusEl.textContent = 'Stopped';
-    _stirrerUnitState = 'stop';
+    if (typeof _rpmValShaftState !== 'undefined' && _rpmValShaftState) {
+        _rpmValShaftState.upDisabled = false;
+        _rpmValShaftState.downDisabled = false;
+        _rpmValShaftState.cmd = 'stop';
+    }
+    _shaftSetStatusAll('Stopped');
+    _shaftSetActiveAll('stop');
+    _shaftApplyDisabledFlags();
 }
 
 function _dtSyncStirrerLock() {
-    var dt = _dissolutionTest;
-    // Shaft Up/Down/Stop only before start and after abort/complete — not while test is active.
-    var locked = !!(dt && (dt.running || dt.paused || dt.preheating));
-    ['dt-stirrer-up', 'dt-stirrer-stop', 'dt-stirrer-down'].forEach(function (id) {
-        var el = _dtEl(id);
-        if (!el) return;
-        if (locked) {
-            el.disabled = true;
-            return;
-        }
-        if (id === 'dt-stirrer-up' && dt && dt.shaftUpDisabled) {
-            el.disabled = true;
-            return;
-        }
-        if (id === 'dt-stirrer-down' && dt && dt.shaftDownDisabled) {
-            el.disabled = true;
-            return;
-        }
-        el.disabled = false;
-    });
+    _shaftApplyDisabledFlags();
 }
 
-function stirrerUnitCommand(cmd) {
-    if (cmd !== 'up' && cmd !== 'down' && cmd !== 'stop') return;
+function applyShaftHomeFromEsp() {
+    _dtClearShaftTimers();
+    _shaftCmdSeq += 1; // invalidate in-flight UI completions
+    _shaftMotion = 'home';
+    _stirrerUnitState = 'stop';
     var dt = _dissolutionTest;
-    if (dt && (dt.running || dt.paused || dt.preheating)) {
+    if (dt) {
+        dt.shaftDownDisabled = true;
+        dt.shaftUpDisabled = false;
+        dt.liftPositionBlocked = false;
+    }
+    if (typeof _rpmValShaftState !== 'undefined' && _rpmValShaftState) {
+        _rpmValShaftState.downDisabled = true;
+        _rpmValShaftState.upDisabled = false;
+        _rpmValShaftState.cmd = 'stop';
+    }
+    _shaftSetStatusAll('Down (home)');
+    _shaftSetActiveAll('stop');
+    _shaftApplyDisabledFlags();
+    // Safety: if still moving, request stop (ignore result).
+    if (typeof window.dissoLift === 'function') {
+        window.dissoLift('stop').catch(function () {});
+    }
+}
+window.applyShaftHomeFromEsp = applyShaftHomeFromEsp;
+
+/**
+ * Shared shaft Up / Stop / Down for dt page, Settings, and RPM validation.
+ * DOWN ACK = motion started (Lowering). Home only via LF-CL-HOME → applyShaftHomeFromEsp.
+ */
+function shaftUnitCommand(cmd, opts) {
+    opts = opts || {};
+    if (cmd !== 'up' && cmd !== 'down' && cmd !== 'stop') return;
+
+    var dt = _dissolutionTest;
+    var blockTest = opts.blockWhileTest !== false;
+    if (blockTest && dt && (dt.running || dt.paused || dt.preheating)) {
         showAppModal('Shaft controls are unavailable while a test is running or preheating. Abort the test first.', 'Shaft Position');
         return;
     }
-    if (cmd === 'up' && dt && dt.shaftUpDisabled) return;
-    if (cmd === 'down' && dt && dt.shaftDownDisabled) return;
+    if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive() && opts.fromSettings) {
+        showAppModal('Finish or abort the dissolution test before using Settings shaft controls.', 'Shaft Controls');
+        return;
+    }
 
+    var upDisabled = !!(dt && dt.shaftUpDisabled) || !!(_rpmValShaftState && _rpmValShaftState.upDisabled);
+    var downDisabled = !!(dt && dt.shaftDownDisabled) || !!(_rpmValShaftState && _rpmValShaftState.downDisabled) || _shaftMotion === 'home';
+    if (cmd === 'up' && upDisabled) return;
+    if (cmd === 'down' && downDisabled) return;
+
+    _shaftArmEventsPoll();
+    var seq = ++_shaftCmdSeq;
     _stirrerUnitState = cmd;
-    var labels = { up: 'Raising', down: 'Lowering', stop: 'Stopped' };
-    var statusEl = _dtEl('dt-stirrer-status');
-    if (statusEl) statusEl.textContent = labels[cmd] || 'Stopped';
-    var map = { up: 'dt-stirrer-up', stop: 'dt-stirrer-stop', down: 'dt-stirrer-down' };
-    Object.keys(map).forEach(function (key) {
-        var el = _dtEl(map[key]);
-        if (!el) return;
-        el.classList.toggle('is-active', key === cmd);
+
+    if (cmd === 'stop') {
+        _dtClearShaftTimers();
+        _shaftMotion = 'stop';
+        if (dt) {
+            dt.shaftUpDisabled = false;
+            dt.shaftDownDisabled = false;
+        }
+        if (_rpmValShaftState) {
+            _rpmValShaftState.upDisabled = false;
+            _rpmValShaftState.downDisabled = false;
+            _rpmValShaftState.cmd = 'stop';
+        }
+        _shaftSetStatusAll('Stopped');
+        _shaftSetActiveAll('stop');
+        _shaftApplyDisabledFlags();
+    } else if (cmd === 'up') {
+        _shaftMotion = 'raising';
+        if (dt) dt.shaftDownDisabled = false;
+        if (_rpmValShaftState) _rpmValShaftState.downDisabled = false;
+        _shaftSetStatusAll('Raising');
+        _shaftSetActiveAll('up');
+        _shaftApplyDisabledFlags();
+    } else {
+        _shaftMotion = 'lowering';
+        _shaftSetStatusAll('Lowering');
+        _shaftSetActiveAll('down');
+        _shaftApplyDisabledFlags();
+    }
+
+    if (typeof window.dissoLift !== 'function') {
+        if (cmd === 'stop') _dtClearShaftTimers();
+        return;
+    }
+
+    window.dissoLift(cmd).then(function (res) {
+        if (seq !== _shaftCmdSeq) return; // superseded by a newer command
+        var body = (res && res.body) ? res.body : res;
+        var ok = !!(res && res.ok !== false) && !(body && body.ok === false);
+        if (!ok) {
+            var msg = (typeof friendlyHardwareError === 'function')
+                ? friendlyHardwareError((body && body.error) || (res && res.error) || 'Shaft move failed.')
+                : 'Shaft move failed. Try again.';
+            showAppModal(msg, 'Shaft');
+            _shaftMotion = 'stop';
+            _shaftSetStatusAll('Stopped');
+            _shaftSetActiveAll('stop');
+            _shaftApplyDisabledFlags();
+            return;
+        }
+        if (cmd === 'down') {
+            // Motion started only — wait for LF-CL-HOME for home latch.
+            if (dt) dt.liftPositionBlocked = false;
+            _shaftSetStatusAll('Lowering');
+            _shaftSetActiveAll('down');
+        } else if (cmd === 'up') {
+            _dtClearShaftTimers();
+            // Soft travel hint only; Stop clears it. Do not permanently kill Up.
+            _dtShaftUpTimerId = setTimeout(function () {
+                _dtShaftUpTimerId = null;
+                if (seq !== _shaftCmdSeq) return;
+                if (_shaftMotion !== 'raising') return;
+                var stHint = 'Up';
+                _shaftSetStatusAll(stHint);
+            }, 20000);
+        } else if (cmd === 'stop') {
+            _shaftSetStatusAll('Stopped');
+            _shaftSetActiveAll('stop');
+        }
+        _shaftApplyDisabledFlags();
+    }).catch(function (err) {
+        if (seq !== _shaftCmdSeq) return;
+        var msg = (typeof friendlyHardwareError === 'function')
+            ? friendlyHardwareError(err)
+            : 'Shaft move failed. Try again.';
+        showAppModal(msg, 'Shaft');
+        _shaftMotion = 'stop';
+        _shaftSetStatusAll('Stopped');
+        _shaftSetActiveAll('stop');
+        _shaftApplyDisabledFlags();
     });
-    if (typeof window.dissoLift === 'function') {
-        window.dissoLift(cmd).then(function (res) {
-            var body = (res && res.body) ? res.body : res;
-            var ok = !!(res && res.ok !== false) && !(body && body.ok === false);
-            if (!ok) return res;
-            if (cmd === 'down') {
-                if (dt) {
-                    dt.shaftDownDisabled = true;
-                    dt.liftPositionBlocked = false;
-                }
-                var downEl = _dtEl('dt-stirrer-down');
-                if (downEl) {
-                    downEl.disabled = true;
-                    downEl.classList.remove('is-active');
-                }
-                if (statusEl) statusEl.textContent = 'Down (home)';
-                _dtSetStatus('Lifting column lowered. Ready when Preheat/Start is available.', 'ready');
-            }
-            if (cmd === 'up') {
-                _dtClearShaftTimers();
-                _dtShaftUpTimerId = setTimeout(function () {
-                    _dtShaftUpTimerId = null;
-                    if (_dissolutionTest) _dissolutionTest.shaftUpDisabled = true;
-                    var upEl = _dtEl('dt-stirrer-up');
-                    if (upEl) {
-                        upEl.disabled = true;
-                        upEl.classList.remove('is-active');
-                    }
-                    var st = _dtEl('dt-stirrer-status');
-                    if (st) st.textContent = 'Up';
-                }, 20000);
-            }
-            if (cmd === 'stop') {
-                _dtClearShaftTimers();
-            }
-            return res;
-        }).catch(function () {});
-    }
+
     if (typeof logAuditEvent === 'function') {
-        logAuditEvent('Shaft position ' + cmd, 'Shaft command: ' + (labels[cmd] || cmd), { eventType: 'lifecycle' });
+        var labels = { up: 'Raising', down: 'Lowering', stop: 'Stopped' };
+        logAuditEvent('Shaft position ' + cmd, 'Shaft ' + (labels[cmd] || cmd), { eventType: 'lifecycle' });
     }
+}
+
+function stirrerUnitCommand(cmd) {
+    shaftUnitCommand(cmd, { blockWhileTest: true });
+}
+
+function rpmValShaftCommand(cmd) {
+    shaftUnitCommand(cmd, { blockWhileTest: false });
+}
+
+function _rpmValClearShaftTimers() {
+    _dtClearShaftTimers();
+}
+
+function _rpmValResetShaftButtons() {
+    _dtResetShaftButtons();
 }
 
 function dissolutionTestStart() {
@@ -12833,8 +13064,8 @@ function dissolutionTestStart() {
     if (typeof window.dissoResumeTest === 'function' && dt.paused) {
         window.dissoResumeTest().then(function (res) {
             if (!res.ok || !(res.body && res.body.ok)) {
-                var msg = (res.body && res.body.error) || 'ESP resume failed';
-                if ((res.body && res.body.errorCode) === 'lift_position' || /lift|column|position/i.test(msg)) {
+                var msg = friendlyHardwareError((res.body && res.body.error) || '', 'Could not resume test. Try again.');
+                if ((res.body && res.body.errorCode) === 'lift_position' || /lift|column|position/i.test(String((res.body && res.body.error) || ''))) {
                     dt.liftPositionBlocked = true;
                     _dtSetControlsIdle();
                     msg = 'Lifting column is not in position. Move the lifting column Down using Shaft Position, then press Start again.';
@@ -12868,13 +13099,13 @@ function dissolutionTestStart() {
             if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
             _dtSetControlsRunning();
             _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-            logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' via ESP', { eventType: 'lifecycle' });
+            logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' started', { eventType: 'lifecycle' });
             if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
         }).catch(function (err) {
             if (startBtn) startBtn.disabled = false;
-            var msg = (err && err.message) ? err.message : 'Failed to start test on ESP';
+            var msg = friendlyHardwareError(err, 'Could not start test. Try again.');
             var code = err && err.errorCode;
-            if (code === 'lift_position' || /lift|column|position/i.test(msg)) {
+            if (code === 'lift_position' || /lift|column|position/i.test(String((err && err.message) || ''))) {
                 dt.running = false;
                 dt.paused = false;
                 dt.liftPositionBlocked = true;
@@ -12914,7 +13145,7 @@ function dissolutionTestPause() {
     if (typeof window.dissoPauseTest === 'function') {
         window.dissoPauseTest().then(function (res) {
             if (!res.ok || !(res.body && res.body.ok)) {
-                showAppModal((res.body && res.body.error) || 'ESP pause failed', 'Test');
+                showAppModal(friendlyHardwareError((res.body && res.body.error) || '', 'Could not pause test. Try again.'), 'Test');
                 return;
             }
             dt.paused = true;
@@ -13272,7 +13503,9 @@ function _vtUpdateStatsFromLive(live) {
 }
 
 function openShaftPositionPage() {
+    _shaftArmEventsPoll();
     goToPage('shaft-position');
+    _shaftApplyDisabledFlags();
 }
 
 function closeShaftPositionPage() {

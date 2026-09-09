@@ -100,12 +100,11 @@ def sensor_available():
 
 
 def _hardware_unavailable_response():
-    port = _configured_port()
     return {
         "ok": False,
         "hardwarePresent": False,
-        "port": port,
-        "error": "Biometric sensor not connected ({} not found). Connect the R307 sensor and restart.".format(port),
+        "port": _configured_port(),
+        "error": "Fingerprint sensor is not connected. Check the sensor cable and try again.",
     }
 
 
@@ -162,6 +161,8 @@ def _read_response(ser, timeout_sec=2.0):
         raise ValueError("Invalid fingerprint response header")
     pkt_type = header[6]
     length = int.from_bytes(header[7:9], "big")
+    if length < 2 or length > 128:
+        raise ValueError("Invalid fingerprint response length")
     body = _read_exact(ser, length, timeout_sec)
     payload = body[:-2]
     recv_chk = int.from_bytes(body[-2:], "big")
@@ -171,7 +172,17 @@ def _read_response(ser, timeout_sec=2.0):
     return pkt_type, payload
 
 
-def _open_serial():
+def _close_serial():
+    global _ser
+    if _ser is not None:
+        try:
+            _ser.close()
+        except Exception:
+            pass
+        _ser = None
+
+
+def _open_serial(force_reopen: bool = False):
     global _ser, _port
     if not serial:
         raise FileNotFoundError(errno.ENOENT, "pyserial not installed", _port)
@@ -180,6 +191,8 @@ def _open_serial():
     if not port or not os.path.exists(port):
         raise FileNotFoundError(errno.ENOENT, "Biometric UART device not found", port)
     # Caller owns _lock; do not re-acquire here to avoid deadlock.
+    if force_reopen:
+        _close_serial()
     if _ser and getattr(_ser, "is_open", False):
         return _ser
     _ser = serial.Serial(
@@ -200,20 +213,44 @@ def _open_serial():
 def _exec(cmd_payload, timeout_sec=2.0):
     if not sensor_available():
         return _hardware_unavailable_response()
-    try:
-        with _lock:
-            ser = _open_serial()
-            ser.reset_input_buffer()
-            packet = _build_packet(cmd_payload)
-            ser.write(packet)
-            ser.flush()
-            pkt_type, payload = _read_response(ser, timeout_sec=timeout_sec)
-    except FileNotFoundError:
-        return _hardware_unavailable_response()
-    except OSError as exc:
-        return {"ok": False, "hardwarePresent": sensor_available(), "error": str(exc), "code": None}
+    last_exc = None
+    for attempt in range(2):
+        try:
+            with _lock:
+                ser = _open_serial(force_reopen=(attempt > 0))
+                ser.reset_input_buffer()
+                packet = _build_packet(cmd_payload)
+                ser.write(packet)
+                ser.flush()
+                pkt_type, payload = _read_response(ser, timeout_sec=timeout_sec)
+            break
+        except FileNotFoundError:
+            return _hardware_unavailable_response()
+        except (OSError, TimeoutError, ValueError, serial.SerialException if serial else OSError) as exc:
+            last_exc = exc
+            if _logger:
+                _logger.warning("[BIOMETRIC] packet/IO attempt %s failed: %s", attempt + 1, exc)
+            _close_serial()
+            if attempt == 0:
+                time.sleep(0.15)
+                continue
+            return {
+                "ok": False,
+                "hardwarePresent": sensor_available(),
+                "error": "Fingerprint sensor error. Try again.",
+                "code": None,
+            }
+    else:
+        return {
+            "ok": False,
+            "hardwarePresent": sensor_available(),
+            "error": "Fingerprint sensor error. Try again.",
+            "code": None,
+            "detail": str(last_exc) if last_exc else None,
+        }
+
     if pkt_type != 0x07 or not payload:
-        return {"ok": False, "error": "Invalid response packet", "code": None}
+        return {"ok": False, "error": "Fingerprint sensor error. Try again.", "code": None}
     code = payload[0]
     if code != _CONFIRM_OK:
         return {"ok": False, "error": _confirm_msg(code), "code": code}
@@ -222,14 +259,14 @@ def _exec(cmd_payload, timeout_sec=2.0):
 
 def _confirm_msg(code):
     mapping = {
-        _CONFIRM_NO_FINGER: "No finger detected",
-        _CONFIRM_IMAGE_FAIL: "Image capture failed",
-        _CONFIRM_IMAGE_MESSY: "Image too messy",
-        _CONFIRM_FEATURE_FAIL: "Feature extraction failed",
-        _CONFIRM_NO_MATCH: "Fingerprint mismatch",
-        _CONFIRM_NOT_FOUND: "Fingerprint not found",
+        _CONFIRM_NO_FINGER: "No finger detected.",
+        _CONFIRM_IMAGE_FAIL: "Could not capture fingerprint. Try again.",
+        _CONFIRM_IMAGE_MESSY: "Finger image unclear. Lift and place again.",
+        _CONFIRM_FEATURE_FAIL: "Could not read fingerprint. Try again.",
+        _CONFIRM_NO_MATCH: "Fingerprint does not match.",
+        _CONFIRM_NOT_FOUND: "Fingerprint not recognized.",
     }
-    return mapping.get(code, "Fingerprint sensor error ({})".format(code))
+    return mapping.get(code, "Fingerprint sensor error. Try again.")
 
 
 def verify_sensor():
@@ -262,7 +299,7 @@ def get_template_count():
         return res
     payload = res.get("payload", b"")
     if len(payload) < 3:
-        return {"ok": False, "error": "Invalid template count response"}
+        return {"ok": False, "error": "Fingerprint sensor error. Try again."}
     cnt = int.from_bytes(payload[1:3], "big")
     return {"ok": True, "count": cnt}
 
@@ -283,7 +320,7 @@ def _wait_for_finger(timeout_sec=10.0):
                 time.sleep(0.15)
                 continue
             return got
-        return {"ok": False, "error": "Timed out waiting for finger"}
+        return {"ok": False, "error": "Timed out waiting for finger. Place your finger and try again."}
     finally:
         _scan_active.clear()
         try:

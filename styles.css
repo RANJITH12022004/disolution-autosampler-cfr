@@ -2092,12 +2092,38 @@ body {
     background: linear-gradient(135deg, #f87171, #dc2626);
 }
 
+.settings-shaft {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.settings-shaft:hover {
+    background: linear-gradient(135deg, #60a5fa, #2563eb);
+}
+
 .settings-cleaning {
     background: linear-gradient(135deg, #7c3aed, #6d28d9);
 }
 
 .settings-cleaning:hover {
     background: linear-gradient(135deg, #a78bfa, #7c3aed);
+}
+
+.page-content:has(#page-shaft-control.active) {
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px 10px !important;
+}
+#page-shaft-control.active {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+.settings-shaft-page {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* ── Heater control (Settings) ─────────────────────────────── */

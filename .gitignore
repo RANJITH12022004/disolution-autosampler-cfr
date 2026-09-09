@@ -9,6 +9,8 @@ venv/
 logs/
 *.log
 uart_communications.log
+uart1_communications.log
+uart2_communications.log
 db/*.db
 db/*.db-*
 storage/current_user.json

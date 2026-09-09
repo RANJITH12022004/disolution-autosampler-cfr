@@ -115,7 +115,23 @@ config = {
     "ESP_CMD_BAUD": ESP_CMD_BAUD,
     "ESP_TEMP_PORT": ESP_TEMP_PORT,
     "ESP_TEMP_BAUD": ESP_TEMP_BAUD,
-    "UART_LOG_PATH": os.environ.get("UART_LOG_PATH", str(APP_ROOT / "uart_communications.log")),
+    # UART-1 = command ESP; UART-2 = temperature ESP (separate logs)
+    "UART1_LOG_PATH": os.environ.get(
+        "UART1_LOG_PATH",
+        os.environ.get("UART_CMD_LOG_PATH", str(APP_ROOT / "uart1_communications.log")),
+    ),
+    "UART2_LOG_PATH": os.environ.get(
+        "UART2_LOG_PATH",
+        os.environ.get("UART_TEMP_LOG_PATH", str(APP_ROOT / "uart2_communications.log")),
+    ),
+    # Legacy alias → UART-1 (command). Prefer UART1_LOG_PATH / UART2_LOG_PATH.
+    "UART_LOG_PATH": os.environ.get(
+        "UART_LOG_PATH",
+        os.environ.get(
+            "UART1_LOG_PATH",
+            os.environ.get("UART_CMD_LOG_PATH", str(APP_ROOT / "uart1_communications.log")),
+        ),
+    ),
     "BIOMETRIC_PORT": BIOMETRIC_PORT,
     "BIOMETRIC_BAUD": BIOMETRIC_BAUD,
     "BIOMETRIC_ENROLL_TIMEOUT_SEC": BIOMETRIC_ENROLL_TIMEOUT_SEC,
@@ -4303,7 +4319,10 @@ def hardware_stream():
 
 @app.route("/api/hardware/log", methods=["GET"])
 def hardware_log_read():
-    """Return tail of ESP↔Pi communication log for mapping / debug."""
+    """Return tail of ESP↔Pi communication log for mapping / debug.
+
+    Query: channel=1|cmd (UART-1 command) or channel=2|temp (UART-2 temperature).
+    """
     gate = _require_any_session_internal(
         ["quick-test", "recipe-test", "validation-test", "calibration-menu", "cleaning-cycle"],
         "Forbidden. You do not have permission to use hardware controls.",
@@ -4314,7 +4333,8 @@ def hardware_log_read():
         max_lines = int(request.args.get("lines", 500))
     except (TypeError, ValueError):
         max_lines = 500
-    return jsonify(hardware_service.get_uart_log_tail(max_lines=max_lines))
+    channel = request.args.get("channel") or request.args.get("uart") or "1"
+    return jsonify(hardware_service.get_uart_log_tail(max_lines=max_lines, channel=channel))
 
 
 @app.route("/api/hardware/log/reset", methods=["POST"])
@@ -4325,7 +4345,9 @@ def hardware_log_reset():
     )
     if gate:
         return gate
-    result = hardware_service.reset_uart_log(reason="ui_refresh")
+    body = request.get_json(silent=True) or {}
+    channel = body.get("channel") or request.args.get("channel") or "all"
+    result = hardware_service.reset_uart_log(reason="ui_refresh", channel=channel)
     code = 200 if result.get("ok") else 500
     return jsonify(result), code
 

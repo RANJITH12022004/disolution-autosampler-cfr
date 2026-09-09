@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=88">
+    <link rel="stylesheet" href="styles.css?v=90">
 </head>
 
 <body>
@@ -425,6 +425,10 @@
                                     <div class="dt-timer-label">Current Step</div>
                                     <div class="dt-step-number">Step <strong id="dt-current-step">0 / 0</strong></div>
                                     <div class="dt-timer-value" id="dt-hero-timer">00:00:00</div>
+                                    <div class="dt-timer-live-temp" aria-label="Live bath temperature">
+                                        <span class="dt-timer-live-label">Live Temp</span>
+                                        <span class="dt-timer-live-value"><span id="dt-live-temp">--</span><span class="dt-parameter-unit">°C</span></span>
+                                    </div>
                                     <div class="dt-progress-area" aria-label="Progress">
                                         <div class="dt-progress-track"><div class="dt-progress" id="dt-progress-fill" style="width:0%"></div></div>
                                         <div class="dt-progress-percent" id="dt-progress-pct">0%</div>
@@ -447,18 +451,18 @@
                                         <div class="dt-parameter-value"><span id="dt-temperature">--</span><span class="dt-parameter-unit">°C</span></div>
                                     </div>
                                 </div>
-                                <div class="dt-parameter dt-settime">
+                                <div class="dt-parameter dt-total-duration">
                                     <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></div>
                                     <div class="dt-parameter-text">
-                                        <div class="dt-parameter-label">Set Time</div>
-                                        <div class="dt-parameter-value" id="dt-set-time">00:00:00</div>
+                                        <div class="dt-parameter-label">Total Duration</div>
+                                        <div class="dt-parameter-value" id="dt-total-duration">00:00:00</div>
                                     </div>
                                 </div>
-                                <div class="dt-parameter dt-remaining">
+                                <div class="dt-parameter dt-step-duration">
                                     <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 3h8"/><path d="M8 21h8"/><path d="M7 4c0 4 5 4 5 8s-5 4-5 8"/><path d="M17 4c0 4-5 4-5 8s5 4 5 8"/></svg></div>
                                     <div class="dt-parameter-text">
-                                        <div class="dt-parameter-label">Remaining</div>
-                                        <div class="dt-parameter-value" id="dt-remaining-time">00:00:00</div>
+                                        <div class="dt-parameter-label">Step Duration</div>
+                                        <div class="dt-parameter-value" id="dt-step-duration">00:00:00</div>
                                     </div>
                                 </div>
                                 <div class="dt-small-parameters">
@@ -2761,8 +2765,8 @@
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=7"></script>
-    <script src="disso_client.js?v=5"></script>
-    <script src="script.js?v=97"></script>
+    <script src="disso_client.js?v=7"></script>
+    <script src="script.js?v=99"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

@@ -122,10 +122,16 @@
     });
   };
 
-  window.dissoPreheat = function (timeoutSec) {
+  window.dissoPreheat = function (timeoutSec, opts) {
+    opts = opts || {};
+    // Production: PRE-HEAT ACK = heating started. PRE-DONE is async (waitDone).
+    var waitDone = opts.waitDone === true;
     return api('/api/hardware/disso/preheat', {
       method: 'POST',
-      body: { timeout: timeoutSec != null ? timeoutSec : 120 }
+      body: {
+        timeout: timeoutSec != null ? timeoutSec : 120,
+        waitDone: waitDone
+      }
     }).then(function (res) {
       if (!res.ok || !(res.body && res.body.ok)) {
         throw new Error((res.body && res.body.error) || 'Preheat failed');
@@ -231,15 +237,25 @@
         var remHms = (typeof formatHms === 'function')
           ? formatHms(st.remainingSecInStep)
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.remainingSecInStep) : String(st.remainingSecInStep) + 's');
-        _dtSetText('dt-remaining-time', remHms);
+        if (window._dissolutionTest) {
+          window._dissolutionTest.remainingSec = st.remainingSecInStep;
+        }
+        // Left Step Timer only — live remaining for current step.
         _dtSetText('dt-hero-timer', remHms);
-        _dtSetText('dt-remaining', remHms);
       }
       if (st.setSecInStep != null) {
+        if (window._dissolutionTest) {
+          window._dissolutionTest.setSec = st.setSecInStep;
+        }
+      }
+      // Total Duration + Step Duration tiles from local recipe / step set length.
+      if (typeof _dtRefreshDurationTiles === 'function') {
+        _dtRefreshDurationTiles();
+      } else if (st.setSecInStep != null) {
         var setHms = (typeof formatHms === 'function')
           ? formatHms(st.setSecInStep)
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.setSecInStep) : String(st.setSecInStep) + 's');
-        _dtSetText('dt-set-time', setHms);
+        _dtSetText('dt-step-duration', setHms);
       }
       if (st.runStatus) {
         var label = st.runStatus;
@@ -264,6 +280,16 @@
     var bath = temps.bath;
     var ext = temps.external != null ? temps.external : temps.ext;
     var vessels = temps.vessels || [];
+
+    // Test-run Step Timer panel live bath temp
+    var liveEl = document.getElementById('dt-live-temp');
+    if (liveEl) {
+      if (bath != null && bath !== '' && !isNaN(Number(bath))) {
+        liveEl.textContent = Number(bath).toFixed(1);
+      } else {
+        liveEl.textContent = '--';
+      }
+    }
 
     // System info page (no vessel V1–V6 tiles there anymore — bath/ext only)
     var sysBath = document.getElementById('sysinfo-bath');
@@ -368,6 +394,10 @@
       if (evt.type === 'LIFT-HOME') {
         if (typeof window.applyShaftHomeFromEsp === 'function') {
           window.applyShaftHomeFromEsp(evt);
+        }
+      } else if (evt.type === 'PRE-DONE') {
+        if (typeof window.applyPreheatDoneFromEsp === 'function') {
+          window.applyPreheatDoneFromEsp(evt);
         }
       }
     });

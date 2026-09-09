@@ -634,6 +634,9 @@ function friendlyHardwareError(errOrMsg, fallback) {
     if (/LIFT|COLUMN|POSITION/.test(u)) {
         return 'Lifting column is not in position. Move the shaft Down, then try again.';
     }
+    if (/PRE-DONE/.test(u) && /TIMEOUT/.test(u)) {
+        return 'Bath has not reached set temperature yet. Heating is still running.';
+    }
     if (/PRE-HEAT|PRE-DONE|SET-TEMP|STOP-HEAT/.test(u)) {
         return 'Heating command failed. Try again.';
     }
@@ -728,6 +731,14 @@ function restoreDissolutionTestRunUi() {
     if (typeof _dtSyncStirrerLock === 'function') _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('test-run-restore');
+    }
+    if (dt.preheating || dt.preheatDone || dt.running || dt.paused) {
+        if (typeof window.dissoStartCmdEventsPolling === 'function') {
+            window.dissoStartCmdEventsPolling();
+        }
+    }
 }
 
 function isTestRunActive() {
@@ -12315,6 +12326,12 @@ function _dtPopulateRunRecipeFields(recipe) {
     _dtSetText('dt-temperature', _dtFormatTemp(recipe.temperature));
     _dtSetText('dt-sample-volume', _dtFormatVolume(recipe.sampleVolume));
     _dtSetText('dt-rinse-volume', _dtFormatVolume(recipe.rinseVolume));
+    // Total Duration from all recipe steps (Step Duration refreshed in _dtApplyStep).
+    if (_dissolutionTest && Array.isArray(_dissolutionTest.steps) && _dissolutionTest.steps.length) {
+        _dtSetText('dt-total-duration', _dtFormatHms(_dtTotalTestDurationSec(_dissolutionTest)));
+    } else if (Array.isArray(recipe.steps)) {
+        _dtSetText('dt-total-duration', _dtFormatHms(_dtTotalTestDurationSec(recipe.steps)));
+    }
 }
 
 function _dtFormatTemp(val) {
@@ -12368,6 +12385,30 @@ function _dtFormatHms(sec) {
     var mm = Math.floor((n % 3600) / 60);
     var ss = n % 60;
     return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
+}
+
+/** Sum of all recipe step durations (total test length). */
+function _dtTotalTestDurationSec(dtOrSteps) {
+    var steps = Array.isArray(dtOrSteps)
+        ? dtOrSteps
+        : ((dtOrSteps && dtOrSteps.steps) || (_dissolutionTest && _dissolutionTest.steps) || []);
+    var sum = 0;
+    for (var i = 0; i < steps.length; i++) {
+        var s = parseInt(steps[i] && steps[i].durationSeconds, 10);
+        if (!isNaN(s) && s > 0) sum += s;
+    }
+    return sum;
+}
+
+/** Refresh Total Duration + Step Duration parameter tiles (not the live Step Timer). */
+function _dtRefreshDurationTiles() {
+    var dt = _dissolutionTest;
+    _dtSetText('dt-total-duration', _dtFormatHms(_dtTotalTestDurationSec(dt)));
+    // Legacy id aliases if present
+    _dtSetText('dt-set-time', _dtFormatHms(_dtTotalTestDurationSec(dt)));
+    var stepSec = dt ? (dt.setSec || 0) : 0;
+    _dtSetText('dt-step-duration', _dtFormatHms(stepSec));
+    _dtSetText('dt-remaining-time', _dtFormatHms(stepSec));
 }
 
 function _dtSetStatus(message, state) {
@@ -12490,14 +12531,20 @@ function dissolutionPreheatStart() {
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
-    _dtSetStatus('Preheating… waiting for set temperature', 'ready');
+    _dtSetStatus('Starting preheat…', 'ready');
     _dtStopPreheatTimer();
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('test-preheat');
+    }
+    if (typeof window.dissoStartCmdEventsPolling === 'function') {
+        window.dissoStartCmdEventsPolling();
+    }
     var preheatFn = (typeof window.dissoPreheat === 'function')
         ? window.dissoPreheat
         : null;
     function onPreheatDone() {
         var live = _dissolutionTest;
-        if (!live) return;
+        if (!live || live.preheatDone) return;
         live.preheating = false;
         live.preheatDone = true;
         live.heaterForcedOn = true;
@@ -12515,11 +12562,31 @@ function dissolutionPreheatStart() {
             logAuditEvent('Preheat complete', 'Preheat reached set temperature', { eventType: 'lifecycle' });
         }
     }
+    window.applyPreheatDoneFromEsp = onPreheatDone;
     if (!preheatFn) {
         dt.preheatTimerId = setTimeout(onPreheatDone, 8000);
         return;
     }
-    preheatFn(180).then(onPreheatDone).catch(function (err) {
+    // PRE-HEAT ACK = heating started. Wait for async PRE-DONE via events (not HTTP timeout).
+    preheatFn(180, { waitDone: false }).then(function () {
+        var live = _dissolutionTest;
+        if (!live) return;
+        live.preheating = true;
+        live.heaterForcedOn = true;
+        _dtSetPrimaryButton('preheating');
+        _dtSyncEquipVisuals();
+        _dtSetStatus('Preheating… waiting for set temperature', 'ready');
+        if (typeof logAuditEvent === 'function') {
+            logAuditEvent('Preheat started', 'Heater accepted preheat command', { eventType: 'lifecycle' });
+        }
+        // Soft advisory only — do not fail or turn heater off if PRE-DONE is slow.
+        if (live.preheatTimerId != null) clearTimeout(live.preheatTimerId);
+        live.preheatTimerId = setTimeout(function () {
+            var cur = _dissolutionTest;
+            if (!cur || cur.preheatDone || !cur.preheating) return;
+            _dtSetStatus('Still preheating… bath warming to set temperature', 'ready');
+        }, 180000);
+    }).catch(function (err) {
         var live = _dissolutionTest;
         if (!live) return;
         live.preheating = false;
@@ -12532,9 +12599,12 @@ function dissolutionPreheatStart() {
         if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
         if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
         _dtSetStatus('Preheat failed', 'aborted');
-        showAppModal(friendlyHardwareError(err, 'Preheat failed. Try again.'), 'Preheat');
+        showAppModal(friendlyHardwareError(err, 'Could not start preheat. Try again.'), 'Preheat');
     });
 }
+window.applyPreheatDoneFromEsp = function () {
+    // Bound per-session inside dissolutionPreheatStart; no-op until then.
+};
 
 function _dtUpdateProgress() {
     var dt = _dissolutionTest;
@@ -12617,10 +12687,15 @@ function initDissolutionTestRun(recipe) {
             }
         }
     }, 0);
-    // UART-2 live vessel temps are shown on the Vessels info page only.
-    // Keep server state polling for the run; do not arm temp UI stream for this screen.
+    // Live bath temp in Step Timer panel + server run state.
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('test-run');
+    }
     if (typeof window.dissoStartStatePolling === 'function') {
         window.dissoStartStatePolling();
+    }
+    if (typeof window.dissoStartCmdEventsPolling === 'function') {
+        window.dissoStartCmdEventsPolling();
     }
 }
 
@@ -12636,8 +12711,9 @@ function _dtApplyStep(index, resetRemaining) {
     var total = dt.steps.length || 0;
     _dtSetText('dt-current-step', (index + 1) + ' / ' + total);
     _dtSetText('dt-rpm', _dtFormatRpm(step.rpm));
-    _dtSetText('dt-set-time', _dtFormatHms(setSec));
-    _dtSetText('dt-remaining-time', _dtFormatHms(dt.remainingSec));
+    // Parameter tiles: total recipe length + this step's programmed duration.
+    _dtRefreshDurationTiles();
+    // Left Step Timer: live remaining countdown for the current step.
     _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec));
     _dtUpdateProgress();
     _dtSyncEquipVisuals();
@@ -13216,9 +13292,8 @@ function _dtStartTicker() {
     dt.timerId = setInterval(function () {
         if (!_dissolutionTest || !_dissolutionTest.running || _dissolutionTest.paused) return;
         _dissolutionTest.remainingSec = Math.max(0, (_dissolutionTest.remainingSec || 0) - 1);
-        var remHms = _dtFormatHms(_dissolutionTest.remainingSec);
-        _dtSetText('dt-remaining-time', remHms);
-        _dtSetText('dt-hero-timer', remHms);
+        // Only the left Step Timer counts down; Step Duration / Total Duration stay fixed.
+        _dtSetText('dt-hero-timer', _dtFormatHms(_dissolutionTest.remainingSec));
         _dtUpdateProgress();
         _dtAppendTempLogSample();
         if (_dissolutionTest.remainingSec <= 0) _dtOnStepComplete();

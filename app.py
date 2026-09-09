@@ -5147,11 +5147,16 @@ def disso_hw_preheat():
         return gate
     body = request.get_json(force=True, silent=True) or {}
     timeout = body.get("timeout")
+    # Default: return as soon as PRE-HEAT start ACK arrives. PRE-DONE is async.
+    wait_done = body.get("waitDone", body.get("wait_done", False))
     try:
         timeout_f = float(timeout) if timeout is not None else 120.0
     except (TypeError, ValueError):
         timeout_f = 120.0
-    result = disso_cmd_hardware.pre_heat(timeout=timeout_f)
+    result = disso_cmd_hardware.pre_heat(
+        timeout=timeout_f,
+        wait_done=bool(wait_done),
+    )
     return jsonify(result), 200 if result.get("ok") else 400
 
 

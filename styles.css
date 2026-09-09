@@ -10316,7 +10316,7 @@ body.keyboard-open {
 }
 .dt-timer-value {
     margin-top: auto;
-    margin-bottom: auto;
+    margin-bottom: 4px;
     text-align: center;
     color: #b9e7ff;
     font-size: 40px;
@@ -10324,6 +10324,37 @@ body.keyboard-open {
     font-weight: 600;
     letter-spacing: 1px;
     font-variant-numeric: tabular-nums;
+}
+.dt-timer-live-temp {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(8, 24, 36, 0.55);
+    border: 1px solid #1d3c50;
+}
+.dt-timer-live-label {
+    color: #8fb6cc;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+.dt-timer-live-value {
+    color: #ffd7a8;
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
+}
+.dt-timer-live-value .dt-parameter-unit {
+    margin-left: 2px;
+    font-size: 12px;
+    color: #c9a37a;
+    font-weight: 600;
 }
 .dt-progress-area {
     margin-top: auto;
@@ -10428,7 +10459,9 @@ body.keyboard-open {
 }
 .dt-rpm .dt-parameter-icon { color: var(--dt-purple); }
 .dt-temperature .dt-parameter-icon { color: var(--dt-red); }
+.dt-total-duration .dt-parameter-icon,
 .dt-settime .dt-parameter-icon { color: var(--dt-green); }
+.dt-step-duration .dt-parameter-icon,
 .dt-remaining .dt-parameter-icon { color: var(--dt-orange); }
 .dt-sample .dt-parameter-icon { color: var(--dt-cyan); }
 .dt-rinse .dt-parameter-icon { color: #25c9dc; }

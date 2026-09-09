@@ -30,6 +30,12 @@ FACTORY_USER = {
     "role": "Factory",
 }
 
+# Biometric for the hardcoded Factory account is stored in factorySettings.json
+# (Factory is not a members.json row).
+_FACTORY_BIO_TEMPLATE_KEY = "factoryFingerprintTemplateId"
+_FACTORY_BIO_STATUS_KEY = "factoryBiometricEnrollmentStatus"
+_FACTORY_BIO_ENROLLED_AT_KEY = "factoryBiometricEnrolledAt"
+
 def _creation_password_pepper() -> str:
     return os.environ.get("KIOSK_PASSWORD_PEPPER", "tapdensity-kiosk-default-pepper-v1")
 
@@ -766,12 +772,85 @@ def has_non_empty_feature_overrides(member_data: Dict[str, Any]) -> bool:
     return bool((isinstance(allow, list) and len(allow) > 0) or (isinstance(deny, list) and len(deny) > 0))
 
 
+def get_factory_biometric_record() -> Dict[str, Any]:
+    """Synthetic member-like record for Factory biometric enroll/login."""
+    fs = get_factory_settings() or {}
+    rec = dict(FACTORY_USER)
+    tid = fs.get(_FACTORY_BIO_TEMPLATE_KEY)
+    try:
+        rec["fingerprintTemplateId"] = int(tid) if tid is not None and tid != "" else None
+    except (TypeError, ValueError):
+        rec["fingerprintTemplateId"] = None
+    rec["biometricEnrollmentStatus"] = str(
+        fs.get(_FACTORY_BIO_STATUS_KEY) or ("enrolled" if rec["fingerprintTemplateId"] else "not_enrolled")
+    )
+    rec["biometricEnrolledAt"] = fs.get(_FACTORY_BIO_ENROLLED_AT_KEY)
+    rec["biometricEnabled"] = True
+    rec["status"] = "active"
+    rec["mustChangePassword"] = False
+    return rec
+
+
+def link_factory_biometric(template_id: int) -> Dict[str, Any]:
+    """Store Factory fingerprint template id in factory settings after successful enroll."""
+    tid = int(template_id)
+    if tid <= 0:
+        raise ValueError("Invalid fingerprint template id")
+    fs = dict(get_factory_settings() or {})
+    fs[_FACTORY_BIO_TEMPLATE_KEY] = tid
+    fs[_FACTORY_BIO_STATUS_KEY] = "enrolled"
+    fs[_FACTORY_BIO_ENROLLED_AT_KEY] = int(datetime.utcnow().timestamp())
+    save_factory_settings(fs)
+    return get_factory_biometric_record()
+
+
+def clear_factory_biometric() -> Dict[str, Any]:
+    """Clear Factory fingerprint linkage from factory settings."""
+    fs = dict(get_factory_settings() or {})
+    fs[_FACTORY_BIO_TEMPLATE_KEY] = None
+    fs[_FACTORY_BIO_STATUS_KEY] = "not_enrolled"
+    fs[_FACTORY_BIO_ENROLLED_AT_KEY] = None
+    save_factory_settings(fs)
+    return get_factory_biometric_record()
+
+
+def resolve_enroll_target(username: str) -> Optional[Dict[str, Any]]:
+    """Member row or Factory biometric record for enrollment username."""
+    un = str(username or "").strip()
+    if not un:
+        return None
+    if un.upper() == FACTORY_USERNAME.upper():
+        return get_factory_biometric_record()
+    return get_member_by_username(un)
+
+
+def clear_biometric_link_for_record(record: Dict[str, Any]) -> None:
+    """Clear fingerprint linkage for a member or the Factory synthetic record."""
+    if not record:
+        return
+    un = str(record.get("username") or "").strip()
+    if un.upper() == FACTORY_USERNAME.upper() or int(record.get("id") or -1) == 0:
+        clear_factory_biometric()
+        return
+    mid = record.get("id")
+    if mid is None:
+        return
+    clear_member_biometric(int(mid))
+
+
 def get_member_by_fingerprint_template(template_id: int) -> Optional[Dict[str, Any]]:
-    """Lookup member by fingerprint template id."""
+    """Lookup member (or Factory) by fingerprint template id."""
     try:
         tid = int(template_id)
     except (TypeError, ValueError):
         return None
+    factory = get_factory_biometric_record()
+    ft = factory.get("fingerprintTemplateId")
+    try:
+        if ft is not None and int(ft) == tid:
+            return factory
+    except (TypeError, ValueError):
+        pass
     members = list_members()
     for m in members:
         t = m.get("fingerprintTemplateId")
@@ -788,6 +867,15 @@ def get_member_by_fingerprint_template(template_id: int) -> Optional[Dict[str, A
 def get_next_fingerprint_template_id(max_templates: int = 1000) -> int:
     """Find next available template id in [1, max_templates]."""
     used = set()
+    factory = get_factory_biometric_record()
+    ft = factory.get("fingerprintTemplateId")
+    if ft is not None:
+        try:
+            ftid = int(ft)
+            if 1 <= ftid <= max_templates:
+                used.add(ftid)
+        except (TypeError, ValueError):
+            pass
     for m in list_members():
         t = m.get("fingerprintTemplateId")
         if t is None:

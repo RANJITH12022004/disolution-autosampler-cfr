@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=92">
+    <link rel="stylesheet" href="styles.css?v=93">
 </head>
 
 <body>
@@ -260,17 +260,16 @@
                             <p>Return to the active dissolution test</p>
                         </div>
 
-                        <div class="test-card test-card-create" onclick="startRecipeCreation()" style="cursor: pointer;">
+                        <div class="test-card test-card-create" onclick="manageRecipes()" style="cursor: pointer;" data-rbac-nav="recipe-manage">
                             <div class="test-icon">
                                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <line x1="12" y1="8" x2="12" y2="16"></line>
-                                    <line x1="8" y1="12" x2="16" y2="12"></line>
+                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
                                 </svg>
                             </div>
-                            <h2>Create New Recipe</h2>
-                            <p>Create a new dissolution test recipe</p>
+                            <h2>Manage Recipe</h2>
+                            <p>Create, edit, and manage dissolution recipes</p>
                         </div>
 
                         <div class="test-card test-card-load" onclick="startRecipeTest()" style="cursor: pointer;">
@@ -768,16 +767,16 @@
 
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" onclick="continueCreateRecipeToSteps()">Continue</button>
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back to Home</button>
+                            <button type="button" class="btn btn-secondary" onclick="backFromCreateRecipeStep1()">Back</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="page" id="page-create-recipe-step2">
                     <div class="add-member-container dissolution-create-recipe dissolution-create-recipe-step2" style="max-width: 960px; margin: 0 auto;">
-                        <h2 class="section-title">Configure Steps</h2>
+                        <h2 class="section-title" id="create-recipe-step2-title">Configure Steps</h2>
                         <p class="section-subtitle" id="create-recipe-step2-summary">
-                            Temperature applies to every step. Enter RPM, duration (HH:MM:SS), and sample volume for each step.
+                            Temperature applies to every step. Enter RPM, duration (min 00:04:00), and sample volume for each step.
                         </p>
                         <div class="dissolution-steps-header dissolution-steps-header--4col">
                             <span>Step</span>
@@ -789,7 +788,7 @@
 
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" onclick="saveDissolutionRecipe()">Save Recipe</button>
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('create-recipe-step1')">Back</button>
+                            <button type="button" class="btn btn-secondary" onclick="backFromCreateRecipeSteps()">Back</button>
                         </div>
                     </div>
                 </div>
@@ -824,7 +823,7 @@
                         </div>
                         </div>
 
-                        <!-- Recipe Actions Modal (Edit / Disable / Load) -->
+                        <!-- Recipe Actions Modal (Edit / Disable) — Load is only on Load Recipe -->
                         <div id="recipe-actions-modal-overlay" class="modal-overlay" style="display: none;">
                             <div class="role-modal">
                                 <h3 id="recipe-actions-modal-title">Recipe</h3>
@@ -837,8 +836,6 @@
                                     <button type="button" class="btn-role-select btn-role-supervisor"
                                         id="recipe-action-disable-btn"
                                         onclick="confirmRecipeAction('disable')">Disable</button>
-                                    <button type="button" class="btn-role-select btn-role-user"
-                                        id="recipe-action-load-btn" onclick="confirmRecipeAction('load')">Load</button>
                                     <button type="button" class="btn-role-select btn-role-cancel"
                                         onclick="closeRecipeActionsModal()">Cancel</button>
                                 </div>
@@ -2362,6 +2359,10 @@
                                     <label>Password</label>
                                     <button type="button" class="btn btn-blue btn-block" id="profile-edit-password-btn" onclick="openProfilePasswordResetPage()">Edit Password</button>
                                 </div>
+                                <div class="form-group full-width" id="profile-register-fingerprint-wrap">
+                                    <label>Fingerprint</label>
+                                    <button type="button" class="btn btn-blue btn-block" id="profile-register-fingerprint-btn" onclick="openOwnBiometricEnroll()">Register Fingerprint</button>
+                                </div>
                             </div>
                         </div>
                         <div class="profile-actions">
@@ -2771,7 +2772,7 @@
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=8"></script>
     <script src="disso_client.js?v=7"></script>
-    <script src="script.js?v=103"></script>
+    <script src="script.js?v=105"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

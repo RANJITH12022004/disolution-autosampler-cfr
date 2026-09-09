@@ -4526,10 +4526,10 @@ def biometric_status():
 
 
 def _require_biometric_enroll_permission(username: str):
-    """Allow enroll for self, profile admin, or Factory acting on another member.
+    """Allow enroll for self (including Factory), profile admin, or Factory for others.
 
-    Factory may register/replace fingerprints for other profiles (Edit Profile /
-    Add Member flows). The Factory account itself cannot have a biometric.
+    Factory may register its own fingerprint (stored in factory settings) and may
+    enroll fingerprints for other member profiles.
     """
     err = _require_auth()
     if err:
@@ -4544,16 +4544,41 @@ def _require_biometric_enroll_permission(username: str):
     target = str(username or "").strip()
     if not target:
         return jsonify({"ok": False, "error": "username is required"}), 400
+    # Factory self-enroll is allowed (only Factory actor).
     if target.upper() == data_service.FACTORY_USERNAME.upper():
-        return jsonify({"ok": False, "error": "Factory account cannot enroll biometric."}), 403
+        if is_factory_actor:
+            return None
+        return jsonify({"ok": False, "error": "Only the Factory account can enroll Factory biometric."}), 403
     if is_factory_actor:
-        # Factory enrolls biometrics for members they manage — not for itself.
         return None
     if cur_un.lower() == target.lower():
         return None
     if _session_has_internal("user-manage"):
         return None
     return jsonify({"ok": False, "error": "Forbidden. You do not have permission to enroll biometric for this user."}), 403
+
+
+def _link_fingerprint_after_enroll(member: dict, template_id: int, before_member: dict, username: str) -> dict:
+    """Persist new template for member or Factory; clear prior owner if needed; delete old sensor template."""
+    previous_owner = data_service.get_member_by_fingerprint_template(template_id)
+    if previous_owner and previous_owner.get("id") != member.get("id"):
+        prev_un = str(previous_owner.get("username") or "")
+        if prev_un.upper() != str(username or "").strip().upper():
+            data_service.clear_biometric_link_for_record(previous_owner)
+
+    is_factory_target = str(username or "").strip().upper() == data_service.FACTORY_USERNAME.upper()
+    if is_factory_target:
+        linked = data_service.link_factory_biometric(template_id)
+    else:
+        member["fingerprintTemplateId"] = template_id
+        member["biometricEnrollmentStatus"] = "enrolled"
+        member["biometricEnrolledAt"] = int(time.time())
+        member["biometricEnabled"] = True
+        data_service.save_member(member)
+        linked = data_service.get_member(member.get("id")) or member
+
+    _delete_previous_biometric_template_after_replace(before_member, template_id, username)
+    return linked
 
 
 def _delete_previous_biometric_template_after_replace(before_member: dict, new_template_id: int, username: str) -> None:
@@ -4598,7 +4623,7 @@ def biometric_enroll():
         gate = _require_biometric_enroll_permission(username)
         if gate:
             return gate
-        member = data_service.get_member_by_username(username)
+        member = data_service.resolve_enroll_target(username)
         if not member:
             _audit_event(action="Biometric enroll", outcome="failed", entity_type="member", entity_name=username, details="Member not found for provided username", target_user=username)
             return jsonify({"ok": False, "error": "Member not found for the provided username"}), 404
@@ -4617,32 +4642,21 @@ def biometric_enroll():
         if not enrolled.get("ok"):
             _audit_event(action="Biometric enroll", outcome="failed", entity_type="member", entity_id=member.get("id"), entity_name=username, details=enrolled.get("error") or "Unknown error", target_user=username, before=before_member, extra={"templateId": template_id})
             return jsonify(enrolled), 400
-        previous_owner = data_service.get_member_by_fingerprint_template(template_id)
-        if previous_owner and previous_owner.get("id") != member.get("id"):
-            previous_owner["fingerprintTemplateId"] = None
-            previous_owner["biometricEnrollmentStatus"] = "not_enrolled"
-            previous_owner["biometricEnrolledAt"] = None
-            data_service.save_member(previous_owner)
-        member["fingerprintTemplateId"] = template_id
-        member["biometricEnrollmentStatus"] = "enrolled"
-        member["biometricEnrolledAt"] = int(time.time())
-        member["biometricEnabled"] = True
-        data_service.save_member(member)
-        _delete_previous_biometric_template_after_replace(before_member, template_id, username)
+        linked = _link_fingerprint_after_enroll(member, template_id, before_member, username)
         replaced = before_member.get("fingerprintTemplateId") not in (None, "", template_id)
         _audit_event(
             action="Biometric enroll",
             outcome="success",
             entity_type="member",
-            entity_id=member.get("id"),
+            entity_id=linked.get("id"),
             entity_name=username,
             details="Fingerprint enrolled and linked" + (" (replaced previous template)" if replaced else ""),
             target_user=username,
             before=before_member,
-            after=member,
+            after=linked,
             extra={"templateId": template_id},
         )
-        return jsonify({"ok": True, "templateId": template_id, "linked": True, "memberId": member.get("id")}), 200
+        return jsonify({"ok": True, "templateId": template_id, "linked": True, "memberId": linked.get("id")}), 200
     except Exception as e:
         app.logger.exception("Error during biometric enrollment")
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -4689,7 +4703,7 @@ def biometric_enroll_capture():
             step = 0
         if step not in (1, 2):
             return jsonify({"ok": False, "error": "step must be 1 or 2"}), 400
-        member = data_service.get_member_by_username(username)
+        member = data_service.resolve_enroll_target(username)
         if not member:
             return jsonify({"ok": False, "error": "Member not found for the provided username"}), 404
         status = str(member.get("status") or "active").strip().lower()
@@ -4752,33 +4766,21 @@ def biometric_enroll_capture():
             )
             return jsonify(finalized), 400
 
-        previous_owner = data_service.get_member_by_fingerprint_template(template_id)
-        if previous_owner and previous_owner.get("id") != member.get("id"):
-            previous_owner["fingerprintTemplateId"] = None
-            previous_owner["biometricEnrollmentStatus"] = "not_enrolled"
-            previous_owner["biometricEnrolledAt"] = None
-            data_service.save_member(previous_owner)
-        member["fingerprintTemplateId"] = template_id
-        member["biometricEnrollmentStatus"] = "enrolled"
-        member["biometricEnrolledAt"] = int(time.time())
-        member["biometricEnabled"] = True
-        data_service.save_member(member)
-        # Prefer session-captured previous id if member was refreshed mid-flow.
         replace_before = dict(before_member)
         if "previousTemplateId" in session and session.get("previousTemplateId") is not None:
             replace_before["fingerprintTemplateId"] = session.get("previousTemplateId")
-        _delete_previous_biometric_template_after_replace(replace_before, template_id, username)
+        linked = _link_fingerprint_after_enroll(member, template_id, replace_before, username)
         replaced = replace_before.get("fingerprintTemplateId") not in (None, "", template_id)
         _audit_event(
             action="Biometric enroll",
             outcome="success",
             entity_type="member",
-            entity_id=member.get("id"),
+            entity_id=linked.get("id"),
             entity_name=username,
             details="Fingerprint enrolled and linked (2 captures)" + (" (replaced previous template)" if replaced else ""),
             target_user=username,
             before=before_member,
-            after=member,
+            after=linked,
             extra={"templateId": template_id},
         )
         return jsonify({
@@ -4786,7 +4788,7 @@ def biometric_enroll_capture():
             "step": 2,
             "templateId": template_id,
             "linked": True,
-            "memberId": member.get("id"),
+            "memberId": linked.get("id"),
             "message": "Fingerprint registered successfully.",
         }), 200
     except Exception as e:

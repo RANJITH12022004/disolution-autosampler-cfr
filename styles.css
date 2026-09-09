@@ -1551,6 +1551,16 @@ body {
     box-shadow: 0 4px 12px rgba(34, 197, 94, 0.45);
 }
 
+.btn-action.btn-disable {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+}
+
+.btn-action.btn-disable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(234, 88, 12, 0.45);
+}
+
 .empty-state-message {
     color: var(--text-secondary);
     font-size: 14px;

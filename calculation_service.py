@@ -105,8 +105,8 @@ def _validate_dissolution_recipe(recipe_data: Dict[str, Any]) -> Dict[str, Any]:
                 errors.append("{}: RPM is required".format(label))
             try:
                 duration = int(float(step.get("durationSeconds")))
-                if duration < 1:
-                    errors.append("{}: duration must be at least 1 second".format(label))
+                if duration < 240:
+                    errors.append("{}: duration must be at least 00:04:00 (4 minutes)".format(label))
             except (TypeError, ValueError):
                 errors.append("{}: duration (HH:MM:SS) is required".format(label))
             step_sample = str(step.get("sampleVolume") or "").strip()

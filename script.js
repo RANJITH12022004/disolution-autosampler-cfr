@@ -1175,6 +1175,38 @@ function updateProfileFromCurrentUser(user) {
     if (userIdInput) {
         userIdInput.value = username || '';
     }
+    var isFactory = (typeof isFactorySessionUser === 'function' && isFactorySessionUser(user))
+        || String(username).toUpperCase() === String(FACTORY_USERNAME || 'RLERLT').toUpperCase()
+        || user.id === 0;
+    var pwdBtn = document.getElementById('profile-edit-password-btn');
+    if (pwdBtn) {
+        pwdBtn.style.display = isFactory ? 'none' : '';
+        var pwdGroup = pwdBtn.closest ? pwdBtn.closest('.form-group') : null;
+        if (pwdGroup) pwdGroup.style.display = isFactory ? 'none' : '';
+    }
+    var bioWrap = document.getElementById('profile-register-fingerprint-wrap');
+    if (bioWrap) {
+        bioWrap.style.display = (typeof biometricEnabledSetting === 'undefined' || biometricEnabledSetting) ? '' : 'none';
+    }
+}
+
+function openOwnBiometricEnroll() {
+    if (!biometricEnabledSetting) {
+        showAppModal('Biometric enrollment is disabled by Factory Settings.', 'Biometric Disabled');
+        return;
+    }
+    var user = window.currentUser || {};
+    var username = String(user.username || user.name || '').trim();
+    if (!username) {
+        showAppModal('No user logged in.', 'Register Fingerprint');
+        return;
+    }
+    _populateMemberBiometricSummary({
+        name: user.name || username,
+        username: username,
+        role: user.role || ''
+    });
+    goToPage('member-biometric');
 }
 
 function apiRequest(path, options) {
@@ -2397,11 +2429,6 @@ function _offerSelfBiometricAfterPasswordChange() {
         return;
     }
     var user = window.currentUser || {};
-    var unUpper = String(user.username || '').trim().toUpperCase();
-    if (unUpper === String(FACTORY_USERNAME || 'RLERLT').toUpperCase() || user.id === 0) {
-        goToPage('user-profile');
-        return;
-    }
     var ask = (typeof showConfirmModal === 'function')
         ? showConfirmModal('Register or replace your fingerprint now?', 'Register Fingerprint')
         : Promise.resolve(false);
@@ -2410,12 +2437,11 @@ function _offerSelfBiometricAfterPasswordChange() {
             goToPage('user-profile');
             return;
         }
-        _populateMemberBiometricSummary({
-            name: user.name || user.username || '',
-            username: user.username || '',
-            role: user.role || ''
-        });
-        goToPage('member-biometric');
+        if (typeof openOwnBiometricEnroll === 'function') {
+            openOwnBiometricEnroll();
+            return;
+        }
+        goToPage('user-profile');
     }).catch(function () {
         goToPage('user-profile');
     });
@@ -3016,8 +3042,15 @@ function goToPage(pageName) {
     }
     if (pageName === 'create-recipe-step1') {
         setTimeout(function () {
-            if (window.currentEditingRecipeId && typeof loadRecipeForEdit === 'function') {
+            // Load recipe into form once when Edit starts — do not re-run on Back from steps
+            // (that was jumping to step2 and made header/back appear broken).
+            if (window.currentEditingRecipeId && window._editRecipeNeedsLoad && typeof loadRecipeForEdit === 'function') {
+                window._editRecipeNeedsLoad = false;
                 loadRecipeForEdit();
+            }
+            var titleEl = document.getElementById('header-title');
+            if (titleEl && window.currentEditingRecipeId) {
+                titleEl.textContent = 'Edit Recipe';
             }
         }, 50);
     }
@@ -3120,9 +3153,9 @@ function goBack() {
     var activePage = document.querySelector('.page.active');
     var pageId = activePage ? activePage.id : '';
     if (pageId === 'page-create-recipe-step1') {
-        goToPage('home');
+        backFromCreateRecipeStep1();
     } else if (pageId === 'page-create-recipe-step2') {
-        goToPage('create-recipe-step1');
+        backFromCreateRecipeSteps();
     } else if (pageId === 'page-report-preview') {
         leaveReportPreviewIfAllowed();
     } else if (pageId === 'page-recipe-print-preview') {
@@ -3820,6 +3853,14 @@ function parseHhMmSsToSeconds(value) {
     return (hh * 3600) + (mm * 60) + ss;
 }
 
+/** Minimum per-step duration for Dissolution tests/recipes: 4 minutes. */
+var DISSOLUTION_MIN_STEP_DURATION_SEC = 240;
+
+function dissolutionMinStepDurationMessage(stepLabel) {
+    var prefix = stepLabel ? (String(stepLabel) + ' ') : '';
+    return prefix + 'Step duration must be at least 00:04:00 (4 minutes).';
+}
+
 function formatSecondsAsHhMmSs(seconds) {
     var total = Math.max(0, parseInt(seconds, 10) || 0);
     var hh = Math.floor(total / 3600);
@@ -4130,6 +4171,7 @@ function applyRecipeModeToFields() {
 
 function startRecipeCreation() {
     window.currentEditingRecipeId = null;
+    window._editRecipeNeedsLoad = false;
     window._createRecipeDraft = null;
     window._dissolutionStepIndex = 0;
     var ids = [
@@ -4151,6 +4193,24 @@ function startRecipeCreation() {
     var list = document.getElementById('create-recipe-steps-list');
     if (list) list.innerHTML = '';
     logAuditEvent('Opened Create Recipe', 'Create Recipe screen opened', { eventType: 'navigation' });
+    goToPage('create-recipe-step1');
+}
+
+function backFromCreateRecipeStep1() {
+    var editing = !!window.currentEditingRecipeId;
+    window.currentEditingRecipeId = null;
+    window._editRecipeNeedsLoad = false;
+    window._createRecipeStepPrefill = null;
+    if (editing) {
+        recipeListMode = 'manage';
+        goToPage('manage-recipes');
+        return;
+    }
+    goToPage('home');
+}
+
+function backFromCreateRecipeSteps() {
+    // Stay in edit/create flow on step 1 — do not re-trigger loadRecipeForEdit jump.
     goToPage('create-recipe-step1');
 }
 
@@ -4225,7 +4285,7 @@ function renderDissolutionStepRows(n, listId, prefillSteps) {
             'onfocus="if(typeof openOSKForInput === \'function\') openOSKForInput(this)" ' +
             'onchange="if(typeof enforceDissolutionRpmInput === \'function\') enforceDissolutionRpmInput(this, { title: \'RPM\', asInt: true })" ' +
             'onblur="if(typeof enforceDissolutionRpmInput === \'function\') enforceDissolutionRpmInput(this, { title: \'RPM\', asInt: true })">' +
-            '<input type="text" class="input-field dissolution-step-duration" inputmode="numeric" placeholder="HH:MM:SS" ' +
+            '<input type="text" class="input-field dissolution-step-duration" inputmode="numeric" placeholder="Min 00:04:00" ' +
             'value="' + durVal + '" ' +
             'onfocus="if(typeof openOSKForInput === \'function\') openOSKForInput(this)">' +
             sampleField;
@@ -4263,6 +4323,9 @@ function collectDissolutionStepsFromDom(opts) {
         }
         if (isNaN(durationSeconds) || durationSeconds < 1) {
             return { error: 'Please enter duration as HH:MM:SS for Step ' + stepNum + '.', steps: [] };
+        }
+        if (durationSeconds < DISSOLUTION_MIN_STEP_DURATION_SEC) {
+            return { error: dissolutionMinStepDurationMessage('Step ' + stepNum + ':'), steps: [] };
         }
         if (includeSample && !sampleVolume) {
             return { error: 'Please enter sample volume for Step ' + stepNum + '.', steps: [] };
@@ -4381,7 +4444,7 @@ function continueCreateRecipeToSteps() {
         var recipeName = nameEl.value ? nameEl.value.trim() : '';
         summaryEl.textContent = (recipeName ? recipeName + ' — ' : '') +
             validated.stepCount + ' step' + (validated.stepCount === 1 ? '' : 's') +
-            '. Enter RPM, duration (HH:MM:SS), and sample volume for each step.';
+            '. Enter RPM, duration (min 00:04:00), and sample volume for each step.';
     }
     renderDissolutionStepRows(validated.stepCount, 'create-recipe-steps-list', window._createRecipeStepPrefill);
     goToPage('create-recipe-step2');
@@ -7875,6 +7938,8 @@ function approveSavedRecipeWithCredentials(recipeId, modalTitle, remarks) {
 
 function editRecipe(id) {
     window.currentEditingRecipeId = id;
+    window._editRecipeNeedsLoad = true;
+    window._createRecipeStepPrefill = null;
     goToPage('create-recipe-step1');
 }
 
@@ -7923,16 +7988,15 @@ function loadRecipeForEdit() {
                 var pfMin = parseInt(r.powerFailure, 10);
                 pfEl.value = (!isNaN(pfMin) && pfMin >= 1 && pfMin <= 60) ? String(pfMin) : '';
             }
-            if (typeof renderDissolutionStepRows === 'function') {
-                var recipeSample = r.sampleVolume || '';
-                window._createRecipeStepPrefill = steps.map(function (step) {
-                    var copy = Object.assign({}, step || {});
-                    if (!copy.sampleVolume && recipeSample) copy.sampleVolume = recipeSample;
-                    return copy;
-                });
-                renderDissolutionStepRows(stepCount, 'create-recipe-steps-list', window._createRecipeStepPrefill);
-                goToPage('create-recipe-step2');
-            }
+            var recipeSample = r.sampleVolume || '';
+            window._createRecipeStepPrefill = steps.map(function (step) {
+                var copy = Object.assign({}, step || {});
+                if (!copy.sampleVolume && recipeSample) copy.sampleVolume = recipeSample;
+                return copy;
+            });
+            var headerTitle = document.getElementById('header-title');
+            if (headerTitle) headerTitle.textContent = 'Edit Recipe';
+            // Stay on step 1 so name/temp/media/etc. are editable. Continue → steps.
             return;
         }
 
@@ -8401,23 +8465,23 @@ function loadManageRecipes() {
         if (tableEl) {
             var headRow = tableEl.querySelector('thead tr');
             if (headRow) {
-                if (mode === 'load') {
-                    headRow.innerHTML =
-                        '<th>Product Name</th>' +
-                        '<th>Mode / USP</th>' +
-                        '<th>Temp</th>' +
-                        '<th>Steps</th>' +
-                        '<th>Approval</th>' +
-                        '<th class="actions-col">Load</th>';
-                } else {
-                    headRow.innerHTML =
-                        '<th>Product Name</th>' +
-                        '<th>Mode / USP</th>' +
-                        '<th>Temp</th>' +
-                        '<th>Steps</th>' +
-                        '<th>Approval</th>' +
-                        '<th class="actions-col">Actions</th>';
-                }
+            if (mode === 'load') {
+                headRow.innerHTML =
+                    '<th>Product Name</th>' +
+                    '<th>Mode / USP</th>' +
+                    '<th>Temp</th>' +
+                    '<th>Steps</th>' +
+                    '<th>Approval</th>' +
+                    '<th class="actions-col">Actions</th>';
+            } else {
+                headRow.innerHTML =
+                    '<th>Product Name</th>' +
+                    '<th>Mode / USP</th>' +
+                    '<th>Temp</th>' +
+                    '<th>Steps</th>' +
+                    '<th>Approval</th>' +
+                    '<th class="actions-col">Actions</th>';
+            }
             }
         }
 
@@ -8452,16 +8516,19 @@ function loadManageRecipes() {
             var apprLabel = appr === 'pending' ? 'Pending' : 'Approved';
 
             if (mode === 'load') {
-                var loadBtnHtml = '<button type="button" class="btn-action btn-load" onclick="loadRecipeById(' + (r.id || 0) + ')" title="Load">Load</button>';
+                // Load Recipe: Disable + Load only (no Edit).
+                var loadActionsHtml =
+                    '<button type="button" class="btn-action btn-disable" onclick="disableRecipe(' + (r.id || 0) + ')" title="Disable">Disable</button> ' +
+                    '<button type="button" class="btn-action btn-load" onclick="loadRecipeById(' + (r.id || 0) + ')" title="Load">Load</button>';
                 tr.innerHTML =
                     '<td>' + name + '</td>' +
                     '<td>' + testModeLabel + '</td>' +
                     '<td>' + tempStr + '</td>' +
                     '<td>' + stepsStr + '</td>' +
                     '<td>' + apprLabel + '</td>' +
-                    '<td class="actions-cell actions-col">' + loadBtnHtml + '</td>';
+                    '<td class="actions-cell actions-col">' + loadActionsHtml + '</td>';
             } else {
-                var actionsBtnHtml = '<button type="button" class="btn-action btn-actions" onclick="openRecipeActionsModal(' + (r.id || 0) + ')" title="Edit / Delete / Load">' +
+                var actionsBtnHtml = '<button type="button" class="btn-action btn-actions" onclick="openRecipeActionsModal(' + (r.id || 0) + ')" title="Edit / Disable">' +
                     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
                     '<circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg> Actions</button>';
                 tr.innerHTML =

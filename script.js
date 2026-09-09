@@ -687,6 +687,7 @@ function isDissolutionTestActive() {
     // Lock navigation after Start (preparing shaft / running / paused).
     // Preheat and "recipe loaded but not started" must allow free navigation.
     var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
+    if (dt && dt._aborting) return false;
     if (dt && (dt.running || dt.paused || dt.preparingStart)) return true;
     try {
         if (window._dissoServerRunActive === true) return true;
@@ -1902,11 +1903,14 @@ function leaveReportPreviewIfAllowed() {
 /** Always open preview and apply pending approval gate when applicable. */
 function openPendingReportPreview(reportId) {
     if (reportId == null) return;
-    openReportPreview(reportId, { setGate: true });
+    // Abort/complete must open the pending preview even if Reports menu is restricted.
+    openReportPreview(reportId, { setGate: true, allowWithoutReportsView: true });
 }
 
 function finishTestRunReportSaved(reportId) {
     if (typeof resetQuickTestFormAfterRunIfPending === 'function') resetQuickTestFormAfterRunIfPending();
+    // Prevent test-run nav guard from re-prompting Abort while opening preview.
+    _suppressTestRunNavGuardOnce = true;
     if (reportId) {
         openPendingReportPreview(reportId);
     } else {
@@ -7532,11 +7536,11 @@ function resetRecipePrintPreviewScroll() {
 
 function openReportPreview(reportId, options) {
     if (!reportId) return;
-    if (!userCanViewReports()) {
+    options = options || {};
+    if (!options.allowWithoutReportsView && !userCanViewReports()) {
         denyPermission('view reports');
         return;
     }
-    options = options || {};
     apiRequest(API_BASE + '/api/reports/' + reportId + '/preview').then(function (data) {
         if (data.preview) {
             currentReportId = reportId;
@@ -7549,6 +7553,7 @@ function openReportPreview(reportId, options) {
                 setReportApprovalGateFromPreview(data.preview, reportId);
             }
             applyReportPreviewLockUi(data.preview);
+            _suppressTestRunNavGuardOnce = true;
             goToPage('report-preview');
             resetReportPreviewScroll();
             startReportApprovalPollIfLocked();
@@ -12810,12 +12815,20 @@ function _dtUpdateProgress() {
         if (fillEl) fillEl.style.width = '0%';
         return;
     }
-    var total = dt.steps.length;
-    var done = dt.stepIndex;
+    // Step Timer panel: progress is for the *current step*, not the whole recipe.
+    var setSec = parseInt(dt.setSec, 10) || 0;
+    if (setSec <= 0 && dt.steps[dt.stepIndex]) {
+        setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || 0;
+        if (setSec > 0) dt.setSec = setSec;
+    }
+    var rem = parseInt(dt.remainingSec, 10);
+    if (isNaN(rem)) rem = setSec;
     var frac = 0;
-    if (dt.setSec > 0) frac = Math.max(0, Math.min(1, (dt.setSec - (dt.remainingSec || 0)) / dt.setSec));
-    if (!dt.running && !dt.paused && dt.remainingSec === dt.setSec && dt.stepIndex === 0) frac = 0;
-    var pct = Math.round(((done + frac) / total) * 100);
+    if (setSec > 0) {
+        frac = Math.max(0, Math.min(1, (setSec - rem) / setSec));
+    }
+    if (!dt.running && !dt.paused && rem === setSec && dt.stepIndex === 0) frac = 0;
+    var pct = Math.round(frac * 100);
     pct = Math.max(0, Math.min(100, pct));
     if (pctEl) pctEl.textContent = pct + '%';
     if (fillEl) fillEl.style.width = pct + '%';
@@ -12996,7 +13009,7 @@ function _dtSetControlsRunning() {
     if (abortBtn) {
         abortBtn.style.display = '';
         abortBtn.disabled = false;
-        abortBtn.onclick = function () { dissolutionTestAbort(); };
+        // HTML onclick already calls dissolutionTestAbort — do not stack another handler.
     }
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
@@ -13017,7 +13030,7 @@ function _dtSetControlsPaused() {
     if (abortBtn) {
         abortBtn.style.display = '';
         abortBtn.disabled = false;
-        abortBtn.onclick = function () { dissolutionTestAbort(); };
+        // HTML onclick already calls dissolutionTestAbort — do not stack another handler.
     }
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
@@ -13378,11 +13391,23 @@ function dissolutionTestStart() {
         }
         if (!dt.testStartTime) dt.testStartTime = new Date().toISOString();
         if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        // Seed timer from current step immediately so the panel is never blank
+        // while waiting for the first server state poll.
+        if (!(parseInt(dt.setSec, 10) > 0) && dt.steps[dt.stepIndex]) {
+            dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || 0;
+        }
+        if (!(parseInt(dt.remainingSec, 10) > 0) && dt.setSec > 0) {
+            dt.remainingSec = dt.setSec;
+        }
+        _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec || 0));
+        _dtSetText('dt-current-step', (dt.stepIndex + 1) + ' / ' + dt.steps.length);
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
         logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' started', { eventType: 'lifecycle' });
+        try { window._dissoServerRunActive = true; } catch (eS) { /* ignore */ }
         if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
         if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+        _dtStartTicker();
         _dtUpdateProgress();
         _dtSyncStirrerLock();
     }
@@ -13392,11 +13417,17 @@ function dissolutionTestStart() {
         dt.paused = false;
         dt.preparingStart = false;
         if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        if (!(parseInt(dt.setSec, 10) > 0) && dt.steps[dt.stepIndex]) {
+            dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || 0;
+        }
+        _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec || 0));
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
         logAuditEvent('Resumed dissolution test', (dt.recipe.productName || 'Recipe') + ' resumed', { eventType: 'lifecycle' });
+        try { window._dissoServerRunActive = true; } catch (eR) { /* ignore */ }
         if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
         if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+        _dtStartTicker();
         _dtUpdateProgress();
         _dtSyncStirrerLock();
     }
@@ -13586,12 +13617,29 @@ function _dtStartTicker() {
     var dt = _dissolutionTest;
     if (!dt) return;
     _dtStopTimer();
+    // Ensure setSec is seeded so the progress bar is not stuck at 0%/blank.
+    if (!(parseInt(dt.setSec, 10) > 0) && dt.steps[dt.stepIndex]) {
+        dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || 0;
+    }
+    if (!(parseInt(dt.remainingSec, 10) >= 0) || (dt.remainingSec === 0 && dt.setSec > 0 && dt.running)) {
+        // keep remaining if already counting; only seed when empty at start
+    }
+    if (dt.running && !(parseInt(dt.remainingSec, 10) > 0) && dt.setSec > 0) {
+        dt.remainingSec = dt.setSec;
+    }
+    _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec || 0));
+    _dtUpdateProgress();
     dt.timerId = setInterval(function () {
         if (!_dissolutionTest || !_dissolutionTest.running || _dissolutionTest.paused) return;
         _dissolutionTest.remainingSec = Math.max(0, (_dissolutionTest.remainingSec || 0) - 1);
         // Only the left Step Timer counts down; Step Duration / Total Duration stay fixed.
         _dtSetText('dt-hero-timer', _dtFormatHms(_dissolutionTest.remainingSec));
         _dtUpdateProgress();
+        // Server-authoritative ESP runs: do not locally advance/complete steps
+        // (END-TEST / remainingSec come from disso_test_service). Still tick UI.
+        if (window._dissoServerRunActive) {
+            return;
+        }
         _dtAppendTempLogSample();
         if (_dissolutionTest.remainingSec <= 0) _dtOnStepComplete();
     }, 1000);
@@ -13751,6 +13799,11 @@ function _dtPerformAbort(opts) {
     if (!live || live._aborting) return Promise.resolve(null);
     live._aborting = true;
     live.preparingStart = false;
+    // Clear server-active latch immediately so report-preview navigation is not
+    // blocked by a second Abort confirmation from the test-run nav guard.
+    try { window._dissoServerRunActive = false; } catch (e0) { /* ignore */ }
+    if (typeof window.dissoStopStatePolling === 'function') window.dissoStopStatePolling();
+    _suppressTestRunNavGuardOnce = true;
     if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
     _dtStopTimer();
     _dtStopPreheatTimer();
@@ -13765,16 +13818,30 @@ function _dtPerformAbort(opts) {
     _dtSetStatus('Test aborted', 'aborted');
     logAuditEvent('Aborted dissolution test', (live.recipe.productName || 'Recipe') + ' aborted', { eventType: 'lifecycle' });
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+
+    function _openAbortPreview(rid) {
+        if (rid == null || opts.skipPreview) return rid;
+        _suppressTestRunNavGuardOnce = true;
+        if (typeof finishTestRunReportSaved === 'function') finishTestRunReportSaved(rid);
+        return rid;
+    }
+
     if (typeof window.dissoAbortTest === 'function') {
         return window.dissoAbortTest().then(function (res) {
+            try { window._dissoServerRunActive = false; } catch (e1) { /* ignore */ }
             if (typeof window.dissoStopStatePolling === 'function') window.dissoStopStatePolling();
-            live.reportSaved = true;
-            var rid = res && res.body && res.body.reportId;
-            if (rid && !opts.skipPreview && typeof finishTestRunReportSaved === 'function') {
-                finishTestRunReportSaved(rid);
+            var body = res && res.body ? res.body : null;
+            var ok = !!(res && res.ok) && !(body && body.ok === false);
+            var rid = body && body.reportId;
+            if (ok && rid != null) {
+                live.reportSaved = true;
+                return _openAbortPreview(rid);
             }
-            return rid;
+            // Server abort may clear the run without returning a report id — save locally.
+            live.reportSaved = false;
+            return _dtSaveCompletionReport({ aborted: true, skipPreview: !!opts.skipPreview });
         }).catch(function () {
+            live.reportSaved = false;
             return _dtSaveCompletionReport({ aborted: true, skipPreview: !!opts.skipPreview });
         }).finally(function () {
             if (_dissolutionTest) _dissolutionTest._aborting = false;
@@ -13787,9 +13854,17 @@ function _dtPerformAbort(opts) {
 
 function dissolutionTestAbort() {
     var dt = _dissolutionTest;
-    if (!dt || dt._aborting) return;
+    if (!dt || dt._aborting || dt._abortConfirmOpen) return;
+    if (!dt.running && !dt.paused && !dt.preparingStart) return;
+    dt._abortConfirmOpen = true;
     showYesNoModal('Abort the dissolution test? The run will be saved as aborted.', 'Abort Test', 'Abort', 'Cancel')
-        .then(function (ok) { if (ok) _dtPerformAbort(); });
+        .then(function (ok) {
+            dt._abortConfirmOpen = false;
+            if (ok) _dtPerformAbort();
+        })
+        .catch(function () {
+            dt._abortConfirmOpen = false;
+        });
 }
 
 function dissolutionTestBack() {

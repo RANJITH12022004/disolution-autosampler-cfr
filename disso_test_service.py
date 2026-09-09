@@ -152,15 +152,17 @@ _TEMP_LOG_MAX = 3600  # ~1 hour at 1 sample/sec if polled that often
 
 
 def _append_temp_log_sample() -> None:
-    """Append one continuous bath sample while a test is running."""
+    """Append one continuous bath sample while a test is running.
+
+    Uses the cached UART-2 live snapshot only — never blocks the heartbeat
+    thread on a fresh TEMP query (that starved /api/disso/test/state and froze
+    the Step Timer UI).
+    """
     live = {}
     try:
-        live = temp_hw.query_live_temp_now(wait_sec=0.4) or {}
+        live = temp_hw.get_live() or {}
     except Exception:
-        try:
-            live = temp_hw.get_live() or {}
-        except Exception:
-            live = {}
+        live = {}
     bath = live.get("bath") if isinstance(live, dict) else None
     if bath is None:
         return
@@ -173,7 +175,9 @@ def _append_temp_log_sample() -> None:
         except (TypeError, ValueError):
             set_temp = None
         step_idx = int(_run.get("stepIndex") or 0)
-        steps = proto.normalize_steps(recipe) if recipe else []
+        steps = _run.get("remainingStepsPayload")
+        if not isinstance(steps, list) or not steps:
+            steps = proto.normalize_steps(recipe) if recipe else []
         rpm = None
         if 0 <= step_idx < len(steps):
             rpm = steps[step_idx].get("rpm")

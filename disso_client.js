@@ -230,16 +230,28 @@
     window._dissoServerState = st;
     window._dissoServerRunActive = !!(st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING'));
     var dt = window._dissolutionTest;
-    if (dt) {
+    if (dt && dt._aborting) {
+      window._dissoServerRunActive = false;
+      dt.running = false;
+      dt.paused = false;
+    } else if (dt) {
       if (st.stepIndex != null) dt.stepIndex = st.stepIndex;
       if (st.remainingSecInStep != null) dt.remainingSec = st.remainingSecInStep;
-      if (st.setSecInStep != null) dt.setSec = st.setSecInStep;
+      if (st.setSecInStep != null) {
+        dt.setSec = st.setSecInStep;
+      } else if (!(parseInt(dt.setSec, 10) > 0) && dt.steps && dt.steps[dt.stepIndex]) {
+        dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || dt.setSec || 0;
+      }
       if (st.runStatus === 'RUNNING') {
         dt.running = true;
         dt.paused = false;
       } else if (st.runStatus === 'PAUSED') {
         dt.running = true;
         dt.paused = true;
+      } else if (st.runStatus === 'ABORTED' || st.runStatus === 'COMPLETE' || st.active === false) {
+        dt.running = false;
+        dt.paused = false;
+        window._dissoServerRunActive = false;
       }
     }
     if (typeof _dtSetText === 'function') {
@@ -267,7 +279,7 @@
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.setSecInStep) : String(st.setSecInStep) + 's');
         _dtSetText('dt-step-duration', setHms);
       }
-      if (st.runStatus) {
+      if (st.runStatus && !(dt && dt._aborting)) {
         var rs = String(st.runStatus).toLowerCase();
         if (typeof _dtSetStatus === 'function') {
           if (rs === 'running') _dtSetStatus('Test running… Step ' + ((st.stepIndex || 0) + 1) + '/' + (st.stepCount || '?'), 'running');
@@ -284,6 +296,7 @@
     if (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED') {
       stopStatePolling();
       disarmAutoTemp('test-ended');
+      window._dissoServerRunActive = false;
     }
   }
 

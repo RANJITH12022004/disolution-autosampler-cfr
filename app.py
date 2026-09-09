@@ -3742,12 +3742,22 @@ def validate_recipe_endpoint():
 @app.route("/api/reports/<int:report_id>/preview", methods=["GET"])
 def get_report_preview(report_id):
     try:
-        gate = _require_session_internal("reports-view", "Forbidden. You do not have permission to view reports.")
-        if gate:
-            return gate
+        err = _require_auth()
+        if err:
+            return err
+        data_service.refresh_current_user_from_member()
         report = data_service.get_report(report_id)
         if not report:
             return jsonify({"error": "Report not found"}), 404
+        # Operators must open their own pending abort/complete preview for approval gate
+        # even without reports-view (test-run finish/abort path).
+        if not _session_has_internal("reports-view"):
+            op = _report_operated_by_username(report)
+            cur = data_service.get_current_user() or {}
+            cur_u = _norm_username(cur.get("username"))
+            pending = str(report.get("reportApprovalStatus") or "").strip().lower() == "pending"
+            if not (pending and op and cur_u and cur_u == op):
+                return jsonify({"error": "Forbidden. You do not have permission to view reports."}), 403
         rtype = (report.get("type") or "").strip().lower() or "report"
         _audit(
             None,

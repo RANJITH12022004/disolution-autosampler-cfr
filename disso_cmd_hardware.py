@@ -463,7 +463,7 @@ def _simulate_handle_tx(frame: str) -> str:
             _sim["step_rem_sec"] = rem
             _sim["step_index"] = 0
         return inner + (",ACK" if ",ACK" not in upper else "")
-    if upper.startswith("SML,") or upper.startswith("FL-"):
+    if upper.startswith("SML,") or upper.startswith("FL,") or upper.startswith("FL-"):
         return inner + (",ACK" if ",ACK" not in upper else "")
     if upper in ("AUTO-DROP-ON", "AUTO-DROP-OFF"):
         # After full recipe, firmware emits RECIPE,ACK
@@ -611,7 +611,7 @@ def _wait_for_recipe_complete(timeout: float = 5.0) -> Dict[str, Any]:
 def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_sec_in_step: Optional[int] = None) -> Dict[str, Any]:
     """
     Recipe load order:
-      #SET-TEMP-* → #TS-NN* → #RPM,…* → #DUR,…* → #SML,…* → #FL-Nml* → #AUTO-DROP-*
+      #SET-TEMP-* → #TS-NN* → #RPM,…* → #DUR,…* → #SML,…* → #FL,1-n,…* → #AUTO-DROP-*
     then wait for final #RECIPE,ACK* (fail on #ERR,RCP*).
 
     Early #RECIPE,ACK* before all frames are sent is latched but does NOT stop
@@ -619,7 +619,7 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
     """
     frames = proto.build_recipe_frames(recipe, from_step_index=from_step_index, remaining_sec_in_step=remaining_sec_in_step)
     results = []
-    prefixes = ["SET-TEMP", "TS-", "RPM", "DUR", "SML", "FL-", "AUTO-DROP"]
+    prefixes = ["SET-TEMP", "TS-", "RPM", "DUR", "SML", "FL", "AUTO-DROP"]
     recipe_seen: Optional[str] = None
 
     with _bus_lock:

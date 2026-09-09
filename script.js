@@ -12468,20 +12468,18 @@ function _dtUploadRecipeToEsp(recipe) {
             });
         }
         _dtSetStatus('Press Preheat when ready.', 'ready');
-    }).catch(function () {
-        // Silent product UX: no protocol / ESP error modal. Allow retry via Preheat/Start path.
+    }).catch(function (err) {
         if (_dissolutionTest) _dissolutionTest.recipeUploaded = false;
         _dtResetPreheatUi();
-        _dtSetStatus('Press Preheat when ready.', 'ready');
-        // One quiet retry
-        setTimeout(function () {
-            if (!_dissolutionTest || _dissolutionTest.recipeUploaded || _dissolutionTest.running) return;
-            window.dissoUploadRecipe(recipe).then(function () {
-                if (_dissolutionTest) _dissolutionTest.recipeUploaded = true;
-                if (_dissolutionTest && !_dissolutionTest.running) _dtResetPreheatUi();
-                _dtSetStatus('Press Preheat when ready.', 'ready');
-            }).catch(function () {});
-        }, 1500);
+        _dtSetPrimaryButton('disabled');
+        var detail = (err && (err.message || err.error || err.detail)) ? String(err.message || err.error || err.detail) : '';
+        _dtSetStatus('Recipe failed to load to hardware. Check ESP and try Load again.', 'aborted');
+        if (typeof showAppModal === 'function') {
+            showAppModal(
+                'Recipe failed to load to hardware. Check ESP and try Load again.' + (detail ? ('\n\n' + detail) : ''),
+                'Load Recipe'
+            );
+        }
     });
 }
 

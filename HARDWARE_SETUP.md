@@ -16,7 +16,7 @@ Pin mapping and configuration for Raspberry Pi with **two ESP32 UARTs**, A4 prin
 
 **Device:** `/dev/serial0` (`ESP_CMD_PORT`, baud 9600)
 
-Protocol frames: `#TS-*`, `#RPM,*`, `#DUR,*`, `#SML,*`, `#FL-*`, `#START-TEST*`, `#PAUSE-TEST*`, `#STOP-TEST*`, lift/clean/cal. See `Auto sampler disso comm.txt`.
+Protocol frames: `#TS-*`, `#RPM,*`, `#DUR,*`, `#SML,*`, `#FL,*`, `#START-TEST*`, `#PAUSE-TEST*`, `#STOP-TEST*`, lift/clean/cal. See `Auto sampler disso comm.txt` and `firmware/commands`.
 
 ### UART-2 — Temperature / Status ESP
 

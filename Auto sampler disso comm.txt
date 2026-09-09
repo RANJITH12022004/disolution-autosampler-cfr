@@ -8,9 +8,9 @@ Communication between Esp32 And RP PI  ------->
 
 1.  #TS-03*                                #TS-03ACK*                    (Total no of step)
 2.  #RPM,1-100,2-150,3-300*                #RPM,1-100,2-150,3-300*       (RPM of each step)
-3.  #DUR,1-00:01,00:15,00:55*              #DUR,1-00:01,00:15,00:55,ACK* (Test duration of each step)
+3.  #DUR,1-00:01,2-00:15,3-00:55*          #DUR,1-00:01,2-00:15,3-00:55,ACK* (Test duration of each step)
 4.  #SML,1-10,2-15,3-13*                   #SML,1-10,2-15,3-13,ACK*      (Sample amount of each step)
-5.  #FL-2ml*                               #FL-2ml,ACK*                  (Flush sample amount)
+5.  #FL,1-2,2-2,3-2*                       #FL,ACK*                      (Flush sample amount per step)
 
                             TEST 
       RP PI                                    ESP 32

@@ -1,0 +1,102 @@
+*System*
+*CommandReply / action*
+`#PING*`
+`#PING,ACK*`
+`#READY*` / `#WHO*`
+`#READY,MASTER,ACK*`
+`#STATUS*`
+`#STATUS,SAMPLER-…,BATH-…,PEND-…,ACK*`
+`#ALL-ESTOP*`
+E-stop *sampler + bath*
+---
+### *Sampler*
+*CommandMeaning*
+`#INI*`
+Init
+`#HOME*`
+Home
+`#ESTOP*`
+Sampler E-stop only
+`#RESUME*`
+Resume
+`#SMP-STATUS*`
+Sampler status
+`#TB,A-1.4,B-1.4,C-1.4,D-1.4*`
+Tube volumes
+`#SMP,FLT-35*`
+Sample fill time (sec)
+`#SMP,SV-10,FH-5,ST-12*`
+Sampling cycle
+`#RPH,FLT-30*`
+Replenish fill time
+`#RPH,LW*`
+Replenish (level)
+`#RPH,SV-10*`
+Replenish (volume)
+`#DCL,FLT-30*`
+D-clean fill time
+`#DCL,SV-10,NC-4*`
+D-cleaning cycle
+`#AUTO*` / `#MANUAL*`
+Air mode
+`#AC,EXTV-0.8*`
+Air clean (B)
+`#AC,EXTV-0.8,SRC-C*`
+Air clean C
+`#AC,EXTV-0.8,SRC-D*`
+Air clean D
+---
+### *Bath / full test*
+*CommandMeaning*
+`#SET-TEMP-37.0*`
+Set temp
+`#TS-03*`
+Step count
+`#RPM,1-100,2-150*`
+RPM list
+`#DUR,1-00:05,2-00:10*`
+Duration list
+`#SML,1-10,2-15*`
+Sample ml/step
+`#FL,1-2,2-3*`
+Flush ml/step → then `#RECIPE,ACK*`
+`#RECIPE,TEMP-37.0,TS-03,RPM-1-100,2-150,DUR-1-00:05,2-00:10,SML-1-10,2-15,FL-1-2,2-3*`
+One-shot recipe
+`#PRE-HEAT*`
+Preheat
+`#START-TEST*`
+Start test
+`#PAUSE-TEST*` / `#RESUME-TEST*` / `#STOP-TEST*`
+Test control
+`#BATH-ESTOP*`
+Bath E-stop only
+`#BATH-STATUS*`
+Bath status
+`#CLR-RECIPE*`
+Clear recipe
+`#AUTO-DROP-ON*` / `#AUTO-DROP-OFF*`
+Auto drop
+`#START-PLD-100*` / `#STOP-PLD*`
+Stirrer
+`#LF-CU-UP*` / `#LF-CU-DOWN*` / `#LF-CU-STOP*`
+Lift arm
+---
+### *Passthrough*
+*CommandMeaning*
+`#RAW-SMP,INI*`
+Raw frame → sampler
+`#RAW-BATH,GET-STATUS*`
+Raw frame → bath
+---
+### *Async events (master → host)*
+Master forwards bath/sampler traffic, including:
+- `#PRE-DONE,ACK*` · `#END-TEST,ACK*` · `#LF-CL-HOME,ACK*` · `#RECIPE,ACK*`
+- `#CMT,…,ACK*` · `#ERR,…,ACK*`
+- `#SMP-AUTO,ST-n,SV-x,FH-y*` — auto sample when probe arm goes DOWN
+Typical full-test sequence from the host device:
+#RECIPE,TEMP-37.0,TS-02,RPM-1-100,2-100,DUR-1-00:05,2-00:05,SML-1-10,2-10,FL-1-2,2-2*
+#PRE-HEAT*
+ … wait #PRE-DONE,ACK*
+#START-TEST*
+ … wait #SMP-AUTO… / #CMT… per step, then #END-TEST,ACK*
+Flash *master_URAT* only. Host UART cheat-sheet is also on the new *Host UART* web tab.

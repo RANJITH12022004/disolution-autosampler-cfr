@@ -207,14 +207,11 @@ def build_recipe_frames(
     rpm_parts = ["{}-{}".format(st["index"], st["rpm"]) for st in steps]
     frames.append(wrap("RPM," + ",".join(rpm_parts)))
 
-    # Doc: #DUR,1-00:01,00:15,00:55*  (first has index- prefix)
+    # Firmware: #DUR,1-00:05,2-00:10* (every step indexed)
     dur_tokens: List[str] = []
-    for i, st in enumerate(steps):
+    for st in steps:
         token = _fmt_hms_mmss(st["durationSeconds"])
-        if i == 0:
-            dur_tokens.append("{}-{}".format(st["index"], token))
-        else:
-            dur_tokens.append(token)
+        dur_tokens.append("{}-{}".format(st["index"], token))
     frames.append(wrap("DUR," + ",".join(dur_tokens)))
 
     sml_parts = []
@@ -236,7 +233,9 @@ def build_recipe_frames(
         flush_s = str(int(flush_f)) if flush_f == int(flush_f) else str(flush_f)
     except (TypeError, ValueError):
         flush_s = "0"
-    frames.append(wrap("FL-{}ml".format(flush_s)))
+    # Firmware: #FL,1-2,2-3* (per-step flush ml; recipe rinse applies to each step)
+    fl_parts = ["{}-{}".format(st["index"], flush_s) for st in steps]
+    frames.append(wrap("FL," + ",".join(fl_parts)))
 
     frames.append(build_auto_drop(recipe_auto_drop_on(recipe)))
     return frames

@@ -46,9 +46,9 @@ Pi uploads **remaining** steps only, renumbered `1…N` (max **12** steps).
 | 1 | `#SET-TEMP-37.0*` | `#SET-TEMP-37.0,ACK*` | Set bath temperature first |
 | 2 | `#TS-03*` | `#TS-03ACK*` or `#TS-03,ACK*` | Total step count (`NN` = 2-digit, e.g. `01`…`12`) |
 | 3 | `#RPM,1-100,2-150,3-300*` | `#RPM,1-100,2-150,3-300,ACK*` (or echo+ACK) | RPM per step: `stepIndex-rpm` |
-| 4 | `#DUR,1-00:01,00:15,00:55*` | `#DUR,…,ACK*` | Duration per step. **First** token is `index-MM:SS` (or `HH:MM:SS`); later tokens are times only |
+| 4 | `#DUR,1-00:05,2-00:10,3-00:55*` | `#DUR,…,ACK*` | Duration per step: every token is `index-MM:SS` (or `HH:MM:SS`) |
 | 5 | `#SML,1-10,2-15,3-13*` | `#SML,…,ACK*` | Sample volume (ml) per step: `index-volume` |
-| 6 | `#FL-2ml*` | `#FL-2ml,ACK*` | Flush / rinse volume for the run |
+| 6 | `#FL,1-2,2-3,3-2*` | `#FL,ACK*` | Flush / rinse volume (ml) per step: `index-volume` |
 | 7 | `#AUTO-DROP-ON*` or `#AUTO-DROP-OFF*` | `#AUTO-DROP-ON,ACK*` / `#AUTO-DROP-OFF,ACK*` | Sample Drop Auto / Manual |
 | — | *(async after full recipe)* | `#RECIPE,ACK*` | Full recipe accepted |
 | — | *(async on bad recipe)* | `#ERR,RCP,ACK*` | Recipe rejected |
@@ -237,9 +237,9 @@ ESP must not assume old RAM recipe survived brown-out.
 ```
 #TS-NN*
 #RPM,1-rrr,2-rrr,…*
-#DUR,1-MM:SS,MM:SS,…*
+#DUR,1-MM:SS,2-MM:SS,…*
 #SML,1-v,2-v,…*
-#FL-Vml*
+#FL,1-v,2-v,…*
 #START-TEST*
 #PAUSE-TEST*
 #STOP-TEST*

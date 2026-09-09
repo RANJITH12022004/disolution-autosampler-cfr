@@ -309,7 +309,13 @@ def _simulate_handle_tx(frame: str) -> str:
         return upper + ",ACK"
     if upper == "PRE-HEAT":
         threading.Timer(0.6, lambda: _handle_rx_inner("PRE-DONE,ACK")).start()
+        with _sim_lock:
+            _sim["heater_on"] = True
         return "PRE-HEATTING,ACK"
+    if upper == "STOP-HEAT":
+        with _sim_lock:
+            _sim["heater_on"] = False
+        return "STOP-HEAT,ACK"
     if upper == "START-TEST":
         with _sim_lock:
             _sim["running"] = True
@@ -522,6 +528,70 @@ def pre_heat(timeout: float = 120.0) -> Dict[str, Any]:
         if proto.is_error_response(inner):
             return {"ok": False, "error": inner, "ack": inner, "tx": proto.build_pre_heat()}
     return {"ok": False, "error": "PRE-DONE,ACK timeout", "tx": proto.build_pre_heat()}
+
+
+def set_temp(temperature: Any) -> Dict[str, Any]:
+    """Send #SET-TEMP-xx.x* and wait for ACK."""
+    try:
+        t = float(temperature)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "temperature must be a number"}
+    if t < 20.0 or t > 50.0:
+        return {"ok": False, "error": "temperature must be between 20 and 50 °C"}
+    frame = proto.build_set_temp(t)
+    res = _tx(frame, timeout=5.0, expect_prefix="SET-TEMP")
+    if res.get("ok"):
+        res["temperature"] = round(t, 1)
+    return res
+
+
+def start_heater(temperature: Any = None, wait_done: bool = False, timeout: float = 5.0) -> Dict[str, Any]:
+    """
+    Manual heater ON for Settings:
+    optional #SET-TEMP-* then #PRE-HEAT*.
+    By default waits only for PRE-HEATTING ACK (heater started), not PRE-DONE.
+    """
+    out: Dict[str, Any] = {"ok": True, "steps": []}
+    if temperature is not None and str(temperature).strip() != "":
+        st = set_temp(temperature)
+        out["steps"].append({"setTemp": st})
+        if not st.get("ok"):
+            out["ok"] = False
+            out["error"] = st.get("error") or "SET-TEMP failed"
+            return out
+        out["temperature"] = st.get("temperature")
+
+    _drain_pending(0.1)
+    res = _tx(proto.build_pre_heat(), timeout=5.0, expect_prefix="PRE-HEAT")
+    ack = str(res.get("ack") or res.get("error") or "")
+    ack_u = ack.upper()
+    started = bool(res.get("ok")) or ("PRE-HEAT" in ack_u) or ("PRE-HEATTING" in ack_u)
+    out["steps"].append({"preHeat": res})
+    if not started:
+        out["ok"] = False
+        out["error"] = res.get("error") or "PRE-HEAT failed"
+        return out
+
+    if wait_done:
+        done = pre_heat(timeout=timeout)
+        out["steps"].append({"preDone": done})
+        if not done.get("ok"):
+            out["ok"] = False
+            out["error"] = done.get("error") or "PRE-DONE timeout"
+            return out
+        out["ack"] = done.get("ack")
+    else:
+        out["ack"] = res.get("ack") or "PRE-HEATTING,ACK"
+    out["heater"] = "on"
+    return out
+
+
+def stop_heater() -> Dict[str, Any]:
+    """Send #STOP-HEAT* (manual heater OFF)."""
+    res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-HEAT")
+    if res.get("ok"):
+        res["heater"] = "off"
+    return res
 
 
 def start_test() -> Dict[str, Any]:

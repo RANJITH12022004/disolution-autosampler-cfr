@@ -65,10 +65,11 @@ Pi uploads **remaining** steps only, renumbered `1…N` (max **12** steps).
 | # | Pi → ESP | ESP → Pi | Meaning |
 |---|----------|----------|---------|
 | 1 | `#PRE-HEAT*` | `#PRE-HEATTING,ACK*` then async `#PRE-DONE,ACK*` | Preheat until set temperature reached |
-| 2 | `#START-TEST*` | `#START-TEST,ACK*` | Start (or resume after re-upload) using last recipe |
-| 3 | `#PAUSE-TEST*` | `#PAUSE-TEST,ACK*` | Pause timers / motion as designed |
-| 4 | `#STOP-TEST*` | `#STOP-TEST,ACK*` | Abort / stop test |
-| 5 | *(async)* | `#END-TEST,ACK*` | **Unsolicited:** ESP finished all steps normally |
+| 2 | `#STOP-HEAT*` | `#STOP-HEAT,ACK*` | Stop bath heater (manual / Settings) |
+| 3 | `#START-TEST*` | `#START-TEST,ACK*` | Start (or resume after re-upload) using last recipe |
+| 4 | `#PAUSE-TEST*` | `#PAUSE-TEST,ACK*` | Pause timers / motion as designed |
+| 5 | `#STOP-TEST*` | `#STOP-TEST,ACK*` | Abort / stop test |
+| 6 | *(async)* | `#END-TEST,ACK*` | **Unsolicited:** ESP finished all steps normally |
 
 ---
 

@@ -354,6 +354,7 @@ var PAGE_AUDIT_LABELS = {
     'ip-config': 'IP Config',
     'ip-config-result': 'IP Config',
     'hardware-init': 'Hardware Initialise',
+    'heater-control': 'Heater',
     calibration: 'Calibration',
     'calibration-type-select': 'Select Calibration Type',
     'load-calibration': 'Load Calibration',
@@ -616,6 +617,45 @@ function isDissolutionTestActive() {
         if (window._dissoServerRunActive === true) return true;
     } catch (e) { /* ignore */ }
     return false;
+}
+
+/** True once Preheat has been started (or test is running) — enables Home "Test Screen" card. */
+function hasReturnableDissolutionSession() {
+    var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
+    if (!dt || !dt.recipe) return false;
+    return !!(dt.preheating || dt.preheatDone || dt.running || dt.paused);
+}
+
+function refreshHomeTestScreenCard() {
+    var card = document.getElementById('home-test-screen-card');
+    var grid = document.getElementById('home-test-options');
+    var show = typeof hasReturnableDissolutionSession === 'function' && hasReturnableDissolutionSession();
+    if (card) {
+        if (show) card.removeAttribute('hidden');
+        else card.setAttribute('hidden', '');
+        card.style.display = show ? '' : 'none';
+    }
+    if (grid) grid.classList.toggle('has-test-screen', !!show);
+}
+
+function returnToDissolutionTestScreen() {
+    if (typeof hasReturnableDissolutionSession !== 'function' || !hasReturnableDissolutionSession()) {
+        refreshHomeTestScreenCard();
+        return;
+    }
+    goToPage('test-run');
+}
+
+function restoreDissolutionTestRunUi() {
+    var dt = _dissolutionTest;
+    if (!dt) return;
+    if (dt.running && dt.paused) _dtSetControlsPaused();
+    else if (dt.running) _dtSetControlsRunning();
+    else _dtSetControlsIdle();
+    _dtSyncEquipVisuals();
+    if (typeof _dtSyncStirrerLock === 'function') _dtSyncStirrerLock();
+    if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 }
 
 function isTestRunActive() {
@@ -1863,6 +1903,7 @@ var PAGE_TITLES = {
     'system-info': 'System Info',
     'cleaning-cycle': 'Cleaning Cycle',
     'hardware-init': 'Hardware Initialise',
+    'heater-control': 'Heater',
     'datetime': 'Date and Time',
     'factory-settings': 'Factory Settings',
     'reports': 'Reports',
@@ -2454,12 +2495,17 @@ function goToPage(pageName) {
     }
     if (prevPage === 'test-run' && pageName !== 'test-run' && pageName !== 'vessel-temperature' && pageName !== 'shaft-position' &&
         typeof cleanupDissolutionTestOnLeave === 'function' &&
-        !(typeof isDissolutionTestActive === 'function' && isDissolutionTestActive())) {
+        !(typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) &&
+        !(typeof hasReturnableDissolutionSession === 'function' && hasReturnableDissolutionSession())) {
         cleanupDissolutionTestOnLeave();
     }
     if (prevPage === 'hardware-init' && pageName !== 'hardware-init' &&
         typeof cleanupHardwareInitOnLeave === 'function') {
         cleanupHardwareInitOnLeave();
+    }
+    if (prevPage === 'heater-control' && pageName !== 'heater-control' &&
+        typeof cleanupHeaterControlOnLeave === 'function') {
+        cleanupHeaterControlOnLeave();
     }
     if (prevPage === 'system-info' && pageName !== 'system-info' && pageName !== 'vessel-temperature') {
         if (typeof window.dissoDisarmAutoTemp === 'function') {
@@ -2591,6 +2637,7 @@ function goToPage(pageName) {
         pageName === 'system-settings' ||
         pageName === 'wakeup-schedule' || pageName === 'system-info' ||
         pageName === 'cleaning-cycle' || pageName === 'hardware-init' ||
+        pageName === 'heater-control' ||
         pageName === 'ip-config' || pageName === 'ip-config-result') {
         navActivePage = 'settings';
     }
@@ -2630,6 +2677,9 @@ function goToPage(pageName) {
     if (pageName === 'home') {
         if (logoEl) logoEl.style.display = 'block';
         if (backBtnEl) backBtnEl.style.display = 'none';
+        setTimeout(function () {
+            if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+        }, 30);
     } else {
         if (logoEl) logoEl.style.display = 'none';
         if (backBtnEl) backBtnEl.style.display = 'block';
@@ -2676,6 +2726,11 @@ function goToPage(pageName) {
             if (typeof initHardwareInitPage === 'function') initHardwareInitPage();
         }, 50);
     }
+    if (pageName === 'heater-control') {
+        setTimeout(function () {
+            if (typeof initHeaterControlPage === 'function') initHeaterControlPage();
+        }, 50);
+    }
     if (pageName === 'ip-config') {
         setTimeout(function () {
             if (typeof initIpConfigPage === 'function') initIpConfigPage();
@@ -2711,6 +2766,11 @@ function goToPage(pageName) {
         setTimeout(function () {
             if (typeof onQuickDissolutionStepCountChange === 'function') onQuickDissolutionStepCountChange();
         }, 50);
+    }
+    if (pageName === 'test-run') {
+        setTimeout(function () {
+            if (typeof restoreDissolutionTestRunUi === 'function') restoreDissolutionTestRunUi();
+        }, 40);
     }
     if (pageName === 'disable-recipes') {
         logAuditEvent('Opened disabled recipes', 'Disabled recipes list opened', { eventType: 'navigation' });
@@ -2843,6 +2903,9 @@ function goBack() {
         goToPage('settings');
     } else if (pageId === 'page-hardware-init') {
         if (typeof cleanupHardwareInitOnLeave === 'function') cleanupHardwareInitOnLeave();
+        goToPage('settings');
+    } else if (pageId === 'page-heater-control') {
+        if (typeof cleanupHeaterControlOnLeave === 'function') cleanupHeaterControlOnLeave();
         goToPage('settings');
     } else if (pageId === 'page-factory-settings') {
         goToPage('settings');
@@ -11308,6 +11371,205 @@ function openHardwareInitPage() {
     goToPage('hardware-init');
 }
 
+/* ── Settings heater control ─────────────────────────────────── */
+var _heaterCtrlOn = false;
+var _heaterCtrlBusy = false;
+var _heaterCtrlAborted = false;
+var _heaterCtrlPollId = null;
+
+function cleanupHeaterControlOnLeave() {
+    _heaterCtrlAborted = true;
+    _heaterCtrlBusy = false;
+    if (_heaterCtrlPollId) {
+        clearInterval(_heaterCtrlPollId);
+        _heaterCtrlPollId = null;
+    }
+    if (typeof window.dissoDisarmAutoTemp === 'function') {
+        window.dissoDisarmAutoTemp('leave-heater-control');
+    }
+}
+
+function openHeaterControlPage() {
+    if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
+        showAppModal('Finish or abort the dissolution test before using manual heater control.', 'Heater');
+        return;
+    }
+    goToPage('heater-control');
+}
+
+function _heaterCtrlReadTemp() {
+    var el = document.getElementById('heater-ctrl-temp');
+    if (!el) return NaN;
+    return parseFloat(String(el.value || '').trim());
+}
+
+function _heaterCtrlValidateTemp() {
+    var t = _heaterCtrlReadTemp();
+    if (isNaN(t) || t < 20 || t > 50) {
+        showAppModal('Enter a set temperature between 20 and 50 °C.', 'Heater');
+        return null;
+    }
+    return Math.round(t * 10) / 10;
+}
+
+function _heaterCtrlSetStatus(text, state) {
+    var el = document.getElementById('heater-ctrl-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.remove('is-busy', 'is-ok', 'is-fail');
+    if (state) el.classList.add('is-' + state);
+}
+
+function _heaterCtrlSetUiOn(on) {
+    _heaterCtrlOn = !!on;
+    var visual = document.getElementById('heater-ctrl-visual');
+    var stateEl = document.getElementById('heater-ctrl-state');
+    var offBtn = document.getElementById('heater-ctrl-off');
+    var onBtn = document.getElementById('heater-ctrl-on');
+    if (visual) visual.setAttribute('data-on', _heaterCtrlOn ? 'true' : 'false');
+    if (stateEl) stateEl.textContent = _heaterCtrlOn ? 'On' : 'Off';
+    if (offBtn) {
+        offBtn.classList.toggle('is-active', !_heaterCtrlOn);
+        offBtn.setAttribute('aria-pressed', !_heaterCtrlOn ? 'true' : 'false');
+    }
+    if (onBtn) {
+        onBtn.classList.toggle('is-active', _heaterCtrlOn);
+        onBtn.setAttribute('aria-pressed', _heaterCtrlOn ? 'true' : 'false');
+    }
+}
+
+function _heaterCtrlSetBusy(busy) {
+    _heaterCtrlBusy = !!busy;
+    var applyBtn = document.getElementById('heater-ctrl-apply-btn');
+    var offBtn = document.getElementById('heater-ctrl-off');
+    var onBtn = document.getElementById('heater-ctrl-on');
+    if (applyBtn) applyBtn.disabled = !!busy;
+    if (offBtn) offBtn.disabled = !!busy;
+    if (onBtn) onBtn.disabled = !!busy;
+}
+
+function _heaterCtrlUpdateBath(data) {
+    var bathEl = document.getElementById('heater-ctrl-bath');
+    if (!bathEl) return;
+    var bath = data && (data.bath != null ? data.bath : data.bathTemp);
+    if (bath == null || bath === '' || isNaN(parseFloat(bath))) {
+        bathEl.textContent = '—';
+        return;
+    }
+    bathEl.textContent = parseFloat(bath).toFixed(1) + ' °C';
+}
+
+function _heaterCtrlPollBath() {
+    if (typeof window.dissoFetchTemps !== 'function') return;
+    window.dissoFetchTemps().then(function (data) {
+        if (_heaterCtrlAborted) return;
+        _heaterCtrlUpdateBath(data);
+    }).catch(function () {});
+}
+
+function initHeaterControlPage() {
+    _heaterCtrlAborted = false;
+    _heaterCtrlBusy = false;
+    _heaterCtrlSetUiOn(false);
+    _heaterCtrlSetStatus('Set temperature, then turn the heater ON to send commands to the ESP.');
+    var tempEl = document.getElementById('heater-ctrl-temp');
+    if (tempEl && !String(tempEl.value || '').trim()) tempEl.value = '37.0';
+    if (_heaterCtrlPollId) clearInterval(_heaterCtrlPollId);
+    _heaterCtrlPollBath();
+    _heaterCtrlPollId = setInterval(_heaterCtrlPollBath, 2000);
+    if (typeof window.dissoArmAutoTemp === 'function') {
+        window.dissoArmAutoTemp('heater-control');
+    }
+}
+
+function applyHeaterControlTemp() {
+    if (_heaterCtrlBusy) return;
+    var t = _heaterCtrlValidateTemp();
+    if (t == null) return;
+    if (typeof window.dissoSetTemp !== 'function') {
+        showAppModal('Heater API unavailable.', 'Heater');
+        return;
+    }
+    _heaterCtrlSetBusy(true);
+    _heaterCtrlSetStatus('Sending #SET-TEMP-' + t.toFixed(1) + '* …', 'busy');
+    window.dissoSetTemp(t).then(function () {
+        if (_heaterCtrlAborted) return;
+        _heaterCtrlSetBusy(false);
+        _heaterCtrlSetStatus('Set temperature ' + t.toFixed(1) + ' °C acknowledged by ESP.', 'ok');
+        if (typeof logAuditEvent === 'function') {
+            logAuditEvent('Heater set temp', t.toFixed(1) + ' C', {
+                eventType: 'lifecycle', entityType: 'settings'
+            });
+        }
+    }).catch(function (err) {
+        if (_heaterCtrlAborted) return;
+        _heaterCtrlSetBusy(false);
+        var msg = (err && err.message) ? String(err.message) : 'Set temperature failed';
+        _heaterCtrlSetStatus(msg, 'fail');
+        showAppModal(msg, 'Heater');
+    });
+}
+
+function setHeaterControlPower(on) {
+    if (_heaterCtrlBusy) return;
+    if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
+        showAppModal('Finish or abort the dissolution test before using manual heater control.', 'Heater');
+        return;
+    }
+    if (on) {
+        var t = _heaterCtrlValidateTemp();
+        if (t == null) return;
+        if (typeof window.dissoHeaterOn !== 'function') {
+            showAppModal('Heater API unavailable.', 'Heater');
+            return;
+        }
+        _heaterCtrlSetBusy(true);
+        _heaterCtrlSetStatus('Sending SET-TEMP + PRE-HEAT …', 'busy');
+        window.dissoHeaterOn(t, { waitDone: false }).then(function () {
+            if (_heaterCtrlAborted) return;
+            _heaterCtrlSetBusy(false);
+            _heaterCtrlSetUiOn(true);
+            _heaterCtrlSetStatus('Heater ON — heating to ' + t.toFixed(1) + ' °C.', 'ok');
+            if (typeof logAuditEvent === 'function') {
+                logAuditEvent('Heater on', 'SET-TEMP ' + t.toFixed(1) + ' + PRE-HEAT', {
+                    eventType: 'lifecycle', entityType: 'settings'
+                });
+            }
+        }).catch(function (err) {
+            if (_heaterCtrlAborted) return;
+            _heaterCtrlSetBusy(false);
+            _heaterCtrlSetUiOn(false);
+            var msg = (err && err.message) ? String(err.message) : 'Heater on failed';
+            _heaterCtrlSetStatus(msg, 'fail');
+            showAppModal(msg, 'Heater');
+        });
+        return;
+    }
+    if (typeof window.dissoHeaterOff !== 'function') {
+        showAppModal('Heater API unavailable.', 'Heater');
+        return;
+    }
+    _heaterCtrlSetBusy(true);
+    _heaterCtrlSetStatus('Sending #STOP-HEAT* …', 'busy');
+    window.dissoHeaterOff().then(function () {
+        if (_heaterCtrlAborted) return;
+        _heaterCtrlSetBusy(false);
+        _heaterCtrlSetUiOn(false);
+        _heaterCtrlSetStatus('Heater OFF.', 'ok');
+        if (typeof logAuditEvent === 'function') {
+            logAuditEvent('Heater off', 'STOP-HEAT', {
+                eventType: 'lifecycle', entityType: 'settings'
+            });
+        }
+    }).catch(function (err) {
+        if (_heaterCtrlAborted) return;
+        _heaterCtrlSetBusy(false);
+        var msg = (err && err.message) ? String(err.message) : 'Heater off failed';
+        _heaterCtrlSetStatus(msg, 'fail');
+        showAppModal(msg, 'Heater');
+    });
+}
+
 function _hwInitSetUi(phaseText, detailText, opts) {
     opts = opts || {};
     var phase = document.getElementById('hw-init-phase');
@@ -11978,13 +12240,55 @@ function _dtPopulateRunRecipeFields(recipe) {
     _dtSetText('dt-usp', usp || '--');
     _dtSetText('dt-ar-number', recipe.arNumber || '--');
     _dtSetText('dt-media', recipe.media || '--');
-    _dtSetText('dt-media-volume', recipe.mediaVolume != null && String(recipe.mediaVolume).trim() !== '' ? recipe.mediaVolume : '--');
+    _dtSetText('dt-media-volume', _dtFormatMediaVolume(recipe.mediaVolume));
     _dtSetText('dt-media-ph', recipe.mediaPh != null && recipe.mediaPh !== '' ? recipe.mediaPh : '--');
     _dtSetText('dt-replenishment', recipe.replenishment != null && String(recipe.replenishment).trim() !== '' ? recipe.replenishment : '--');
-    _dtSetText('dt-power-failure', formatPowerFailureDisplay(recipe.powerFailure));
-    _dtSetText('dt-temperature', recipe.temperature != null && recipe.temperature !== '' ? recipe.temperature : '--');
-    _dtSetText('dt-sample-volume', recipe.sampleVolume || '--');
-    _dtSetText('dt-rinse-volume', recipe.rinseVolume || '--');
+    _dtSetText('dt-power-failure', _dtFormatPowerFailValue(recipe.powerFailure));
+    _dtSetText('dt-temperature', _dtFormatTemp(recipe.temperature));
+    _dtSetText('dt-sample-volume', _dtFormatVolume(recipe.sampleVolume));
+    _dtSetText('dt-rinse-volume', _dtFormatVolume(recipe.rinseVolume));
+}
+
+function _dtFormatTemp(val) {
+    if (val == null || val === '') return '--';
+    var n = parseFloat(val);
+    if (isNaN(n)) return String(val);
+    // Unit (°C) lives in the HTML span beside #dt-temperature.
+    return n.toFixed(1);
+}
+
+function _dtFormatRpm(val) {
+    if (val == null || val === '') return '--';
+    var n = parseFloat(val);
+    if (isNaN(n)) return String(val);
+    // Unit (rpm) lives in the HTML span beside #dt-rpm.
+    return String(Math.round(n * 10) / 10);
+}
+
+function _dtFormatPowerFailValue(val) {
+    var n = parseInt(val, 10);
+    if (isNaN(n) || n < 1) return '--';
+    // Unit (min) lives in the HTML span beside #dt-power-failure.
+    return String(n);
+}
+
+function _dtFormatVolume(val) {
+    if (val == null || val === '') return '--';
+    var s = String(val).trim();
+    if (!s) return '--';
+    var n = parseFloat(s);
+    if (isNaN(n)) return s;
+    return n.toFixed(1);
+}
+
+function _dtFormatMediaVolume(val) {
+    if (val == null || val === '') return '--';
+    var s = String(val).trim();
+    if (!s) return '--';
+    if (/ml/i.test(s)) return s;
+    var n = parseFloat(s);
+    if (isNaN(n)) return s;
+    return ((Math.abs(n % 1) < 1e-9) ? String(Math.round(n)) : String(n)) + ' mL';
 }
 
 window._dtPopulateRunRecipeFields = _dtPopulateRunRecipeFields;
@@ -12064,9 +12368,14 @@ function _dtSyncEquipVisuals() {
     if (paddleLabel) {
         paddleLabel.textContent = stirrerOn ? ('On' + (rpm ? ' · ' + rpm + ' RPM' : '')) : 'Off';
     }
-    if (rotor) {
+    var stirrerSvg = paddleEl ? paddleEl.querySelector('.dt-equipment-icon svg') : null;
+    if (stirrerSvg) {
         var rotSec = stirrerOn ? Math.max(0.45, Math.min(2.2, 90 / Math.max(rpm, 25))) : 0;
-        rotor.style.animationDuration = rotSec ? (rotSec + 's') : '';
+        stirrerSvg.style.animationDuration = rotSec ? (rotSec + 's') : '';
+    }
+    if (rotor) {
+        var rotorSec = stirrerOn ? Math.max(0.45, Math.min(2.2, 90 / Math.max(rpm, 25))) : 0;
+        rotor.style.animationDuration = rotorSec ? (rotorSec + 's') : '';
     }
 }
 
@@ -12112,6 +12421,7 @@ function dissolutionPreheatStart() {
     _dtSyncEquipVisuals();
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
     _dtSetStatus('Preheating… waiting for set temperature', 'ready');
     _dtStopPreheatTimer();
     var preheatFn = (typeof window.dissoPreheat === 'function')
@@ -12128,6 +12438,7 @@ function dissolutionPreheatStart() {
         _dtSyncEquipVisuals();
         _dtSyncStirrerLock();
         if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+        if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
         _dtSetStatus('Preheat complete. Press Start to begin.', 'ready');
         if (typeof window.dissoBeep === 'function') {
             window.dissoBeep(1);
@@ -12151,6 +12462,7 @@ function dissolutionPreheatStart() {
         _dtSyncEquipVisuals();
         _dtSyncStirrerLock();
         if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+        if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
         _dtSetStatus('Preheat failed', 'aborted');
         showAppModal((err && err.message) || 'Preheat failed (PRE-HEAT / PRE-DONE).', 'Preheat');
     });
@@ -12254,8 +12566,8 @@ function _dtApplyStep(index, resetRemaining) {
     dt.setSec = setSec;
     if (resetRemaining) dt.remainingSec = setSec;
     var total = dt.steps.length || 0;
-    _dtSetText('dt-current-step', (index + 1) + '/' + total);
-    _dtSetText('dt-rpm', step.rpm != null ? step.rpm : '--');
+    _dtSetText('dt-current-step', (index + 1) + ' / ' + total);
+    _dtSetText('dt-rpm', _dtFormatRpm(step.rpm));
     _dtSetText('dt-set-time', _dtFormatHms(setSec));
     _dtSetText('dt-remaining-time', _dtFormatHms(dt.remainingSec));
     _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec));
@@ -12313,8 +12625,10 @@ function _dtSetPrimaryButton(mode) {
 function _dtSetControlsIdle() {
     var pauseBtn = _dtEl('dt-pause-btn');
     var abortBtn = _dtEl('dt-abort-btn');
+    var startBtn = _dtEl('dt-start-btn');
     var preheatBtn = _dtEl('dt-preheat-btn');
     if (preheatBtn) preheatBtn.style.display = 'none';
+    if (startBtn) startBtn.style.display = '';
     var dt = _dissolutionTest;
     if (dt && dt.preheatDone) _dtSetPrimaryButton('start');
     else if (dt && dt.preheating) _dtSetPrimaryButton('preheating');
@@ -12323,36 +12637,51 @@ function _dtSetControlsIdle() {
     if (abortBtn) abortBtn.style.display = 'none';
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 }
 
 function _dtSetControlsRunning() {
     var pauseBtn = _dtEl('dt-pause-btn');
     var abortBtn = _dtEl('dt-abort-btn');
+    var startBtn = _dtEl('dt-start-btn');
     var preheatBtn = _dtEl('dt-preheat-btn');
-    _dtSetPrimaryButton('abort');
+    if (startBtn) startBtn.style.display = 'none';
+    if (preheatBtn) preheatBtn.style.display = 'none';
     if (pauseBtn) {
         pauseBtn.style.display = '';
+        pauseBtn.disabled = false;
         pauseBtn.textContent = 'Pause';
         pauseBtn.onclick = function () { dissolutionTestPause(); };
     }
-    if (abortBtn) abortBtn.style.display = 'none';
-    if (preheatBtn) preheatBtn.style.display = 'none';
+    if (abortBtn) {
+        abortBtn.style.display = '';
+        abortBtn.disabled = false;
+        abortBtn.onclick = function () { dissolutionTestAbort(); };
+    }
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 }
 
 function _dtSetControlsPaused() {
     var pauseBtn = _dtEl('dt-pause-btn');
     var abortBtn = _dtEl('dt-abort-btn');
-    _dtSetPrimaryButton('abort');
+    var startBtn = _dtEl('dt-start-btn');
+    if (startBtn) startBtn.style.display = 'none';
     if (pauseBtn) {
         pauseBtn.style.display = '';
+        pauseBtn.disabled = false;
         pauseBtn.textContent = 'Resume';
         pauseBtn.onclick = function () { dissolutionTestStart(); };
     }
-    if (abortBtn) abortBtn.style.display = 'none';
+    if (abortBtn) {
+        abortBtn.style.display = '';
+        abortBtn.disabled = false;
+        abortBtn.onclick = function () { dissolutionTestAbort(); };
+    }
     _dtSyncStirrerLock();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 }
 
 function dissolutionTestPrimaryAction() {
@@ -12677,6 +13006,8 @@ function _dtOnStepComplete() {
     _dtStopTimer();
     dt.running = false;
     dt.paused = false;
+    dt.preheating = false;
+    dt.preheatDone = false;
     _dtClearThermalFlags();
     _dtResetShaftButtons();
     _dtSetControlsIdle();
@@ -12687,6 +13018,7 @@ function _dtOnStepComplete() {
     if (fillEl) fillEl.style.width = '100%';
     _dtSetStatus('Test completed', 'done');
     logAuditEvent('Completed dissolution test', (dt.recipe.productName || 'Recipe') + ' finished', { eventType: 'lifecycle' });
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
     _dtSaveCompletionReport({ aborted: false });
 }
 
@@ -12820,12 +13152,14 @@ function _dtPerformAbort(opts) {
     live.running = false;
     live.paused = false;
     live.preheating = false;
+    live.preheatDone = false;
     _dtClearThermalFlags();
     _dtResetShaftButtons();
     _dtApplyStep(live.stepIndex, true);
     _dtSetControlsIdle();
     _dtSetStatus('Test aborted', 'aborted');
     logAuditEvent('Aborted dissolution test', (live.recipe.productName || 'Recipe') + ' aborted', { eventType: 'lifecycle' });
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
     if (typeof window.dissoAbortTest === 'function') {
         return window.dissoAbortTest().then(function (res) {
             if (typeof window.dissoStopStatePolling === 'function') window.dissoStopStatePolling();
@@ -12858,8 +13192,12 @@ function dissolutionTestBack() {
         _dtConfirmAbortForNavigation().then(function (didAbort) {
             if (!didAbort) return;
             _suppressTestRunNavGuardOnce = true;
-            goToPage('manage-recipes');
+            goToPage('home');
         });
+        return;
+    }
+    if (typeof hasReturnableDissolutionSession === 'function' && hasReturnableDissolutionSession()) {
+        goToPage('home');
         return;
     }
     _dtStopTimer();
@@ -12870,8 +13208,10 @@ function dissolutionTestBack() {
         _dissolutionTest.running = false;
         _dissolutionTest.paused = false;
         _dissolutionTest.preheating = false;
+        _dissolutionTest.preheatDone = false;
     }
-    goToPage('manage-recipes');
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    goToPage('home');
 }
 
 function cleanupDissolutionTestOnLeave() {
@@ -12883,6 +13223,8 @@ function cleanupDissolutionTestOnLeave() {
         _dissolutionTest.running = false;
         _dissolutionTest.paused = false;
         _dissolutionTest.preheating = false;
+        _dissolutionTest.preheatDone = false;
+        _dissolutionTest.heaterForcedOn = false;
     }
     if (typeof window.dissoDisarmAutoTemp === 'function') {
         window.dissoDisarmAutoTemp('leave-test-run');
@@ -12891,6 +13233,7 @@ function cleanupDissolutionTestOnLeave() {
         window.dissoStopStatePolling();
     }
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 }
 
 var _vesselTempReturnPage = 'test-run';

@@ -398,6 +398,11 @@ def build_pre_heat() -> str:
     return wrap("PRE-HEAT")
 
 
+def build_stop_heat() -> str:
+    """Stop bath heater / circulation heat (#STOP-HEAT*)."""
+    return wrap("STOP-HEAT")
+
+
 def build_start_pld(rpm: int) -> str:
     """Start stirrer / paddle motor at RPM (#START-PLD-150*)."""
     return wrap("START-PLD-{}".format(int(rpm)))

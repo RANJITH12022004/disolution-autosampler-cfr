@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=82">
+    <link rel="stylesheet" href="styles.css?v=87">
 </head>
 
 <body>
@@ -234,8 +234,8 @@
             <div class="page-content">
                 <!-- Home Page -->
                 <div class="page active" id="page-home">
-                    <div class="test-options">
-                        <div class="test-card" onclick="startQuickTest()" style="cursor: pointer;">
+                    <div class="test-options" id="home-test-options">
+                        <div class="test-card test-card-quick" onclick="startQuickTest()" style="cursor: pointer;">
                             <div class="test-icon">
                                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -246,7 +246,21 @@
                             <p>Run a dissolution test without saving a recipe</p>
                         </div>
 
-                        <div class="test-card" onclick="startRecipeCreation()" style="cursor: pointer;">
+                        <div class="test-card test-card-test-screen" id="home-test-screen-card" hidden
+                            onclick="returnToDissolutionTestScreen()" style="cursor: pointer;">
+                            <div class="test-icon">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                                    <path d="M3 9h18"></path>
+                                    <path d="M9 21V9"></path>
+                                </svg>
+                            </div>
+                            <h2>Test Screen</h2>
+                            <p>Return to the active dissolution test</p>
+                        </div>
+
+                        <div class="test-card test-card-create" onclick="startRecipeCreation()" style="cursor: pointer;">
                             <div class="test-icon">
                                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -259,7 +273,7 @@
                             <p>Create a new dissolution test recipe</p>
                         </div>
 
-                        <div class="test-card" onclick="startRecipeTest()" style="cursor: pointer;">
+                        <div class="test-card test-card-load" onclick="startRecipeTest()" style="cursor: pointer;">
                             <div class="test-icon">
                                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
@@ -396,93 +410,150 @@
 
                 <div class="page" id="page-test-run">
                     <div class="dt-run">
-                        <header class="dt-run-top" aria-label="Tools and status">
-                            <div class="dt-run-tools">
-                                <button type="button" class="dt-tool-btn" id="dt-vessel-info-btn" onclick="openVesselTemperaturePage('test-run')" title="Vessel temperatures" aria-label="Vessel temperatures">
-                                    <span class="dt-tool-icon" aria-hidden="true">i</span>
-                                    <span class="dt-tool-text">Vessels</span>
-                                </button>
-                                <button type="button" class="dt-tool-btn" id="dt-shaft-info-btn" onclick="openShaftPositionPage()" title="Shaft position" aria-label="Shaft position">
-                                    <span class="dt-tool-icon" aria-hidden="true">i</span>
-                                    <span class="dt-tool-text">Shaft</span>
-                                </button>
-                            </div>
-                            <p class="dt-status-msg" id="dt-status-msg">Press Preheat to begin.</p>
-                        </header>
+                        <p class="dt-status-msg" id="dt-status-msg" hidden>Press Preheat to begin.</p>
 
-                        <div class="dt-run-body">
-                            <section class="dt-run-hero" aria-label="Live run status">
-                                <div class="dt-run-hero-main">
-                                    <span class="dt-run-timer-label">Step Timer</span>
-                                    <div class="dt-run-timer" id="dt-hero-timer">00:00:00</div>
-                                </div>
-                                <div class="dt-run-hero-meta">
-                                    <div class="dt-run-hero-step">
-                                        <span class="dt-run-hero-step-key">Step</span>
-                                        <strong class="dt-run-hero-step-val" id="dt-current-step">0/0</strong>
+                        <div class="dt-content">
+
+                            <section class="dt-panel dt-timer-panel" aria-label="Live run status">
+                                <div class="dt-panel-header">
+                                    <div class="dt-panel-icon" aria-hidden="true">
+                                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
                                     </div>
-                                    <div class="dt-run-progress" aria-label="Progress">
-                                        <div class="dt-run-progress-track"><div class="dt-run-progress-fill" id="dt-progress-fill" style="width:0%"></div></div>
-                                        <span class="dt-run-progress-pct" id="dt-progress-pct">0%</span>
+                                    <div class="dt-panel-title">Step Timer</div>
+                                </div>
+                                <div class="dt-timer-content">
+                                    <div class="dt-timer-label">Current Step</div>
+                                    <div class="dt-step-number">Step <strong id="dt-current-step">0 / 0</strong></div>
+                                    <div class="dt-timer-value" id="dt-hero-timer">00:00:00</div>
+                                    <div class="dt-progress-area" aria-label="Progress">
+                                        <div class="dt-progress-track"><div class="dt-progress" id="dt-progress-fill" style="width:0%"></div></div>
+                                        <div class="dt-progress-percent" id="dt-progress-pct">0%</div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="dt-run-live" aria-label="Run parameters">
-                                <div class="dt-run-params dt-run-params-live">
-                                    <div class="dt-run-param dt-run-param-accent"><span class="dt-run-param-key">RPM</span><strong class="dt-run-param-val" id="dt-rpm">--</strong></div>
-                                    <div class="dt-run-param dt-run-param-accent"><span class="dt-run-param-key">Set Temp</span><strong class="dt-run-param-val" id="dt-temperature">--</strong></div>
-                                    <div class="dt-run-param dt-run-param-accent"><span class="dt-run-param-key">Set Time</span><strong class="dt-run-param-val" id="dt-set-time">00:00:00</strong></div>
-                                    <div class="dt-run-param dt-run-param-accent"><span class="dt-run-param-key">Remaining</span><strong class="dt-run-param-val" id="dt-remaining-time">00:00:00</strong></div>
+                            <section class="dt-parameters" aria-label="Run parameters">
+                                <div class="dt-parameter dt-rpm">
+                                    <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 3v3"/><path d="M21 12h-3"/><path d="M12 21v-3"/><path d="M3 12h3"/></svg></div>
+                                    <div class="dt-parameter-text">
+                                        <div class="dt-parameter-label">RPM</div>
+                                        <div class="dt-parameter-value"><span id="dt-rpm">--</span><span class="dt-parameter-unit">rpm</span></div>
+                                    </div>
                                 </div>
-                                <div class="dt-run-params dt-run-params-sample">
-                                    <div class="dt-run-param"><span class="dt-run-param-key">Sample mL</span><strong class="dt-run-param-val" id="dt-sample-volume">--</strong></div>
-                                    <div class="dt-run-param"><span class="dt-run-param-key">Rinse mL</span><strong class="dt-run-param-val" id="dt-rinse-volume">--</strong></div>
-                                    <div class="dt-run-param"><span class="dt-run-param-key">Power Fail</span><strong class="dt-run-param-val" id="dt-power-failure">--</strong></div>
+                                <div class="dt-parameter dt-temperature">
+                                    <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v8a5 5 0 1 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M12 9v7"/></svg></div>
+                                    <div class="dt-parameter-text">
+                                        <div class="dt-parameter-label">Set Temp</div>
+                                        <div class="dt-parameter-value"><span id="dt-temperature">--</span><span class="dt-parameter-unit">°C</span></div>
+                                    </div>
+                                </div>
+                                <div class="dt-parameter dt-settime">
+                                    <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></div>
+                                    <div class="dt-parameter-text">
+                                        <div class="dt-parameter-label">Set Time</div>
+                                        <div class="dt-parameter-value" id="dt-set-time">00:00:00</div>
+                                    </div>
+                                </div>
+                                <div class="dt-parameter dt-remaining">
+                                    <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 3h8"/><path d="M8 21h8"/><path d="M7 4c0 4 5 4 5 8s-5 4-5 8"/><path d="M17 4c0 4-5 4-5 8s5 4 5 8"/></svg></div>
+                                    <div class="dt-parameter-text">
+                                        <div class="dt-parameter-label">Remaining</div>
+                                        <div class="dt-parameter-value" id="dt-remaining-time">00:00:00</div>
+                                    </div>
+                                </div>
+                                <div class="dt-small-parameters">
+                                    <div class="dt-parameter dt-sample">
+                                        <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m14 4 6 6"/><path d="M5 19 3 21"/><path d="M6 17 18 5"/><path d="m4 14 6 6"/></svg></div>
+                                        <div class="dt-parameter-text">
+                                            <div class="dt-parameter-label">Sample mL</div>
+                                            <div class="dt-parameter-value" id="dt-sample-volume">--</div>
+                                        </div>
+                                    </div>
+                                    <div class="dt-parameter dt-rinse">
+                                        <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/></svg></div>
+                                        <div class="dt-parameter-text">
+                                            <div class="dt-parameter-label">Rinse mL</div>
+                                            <div class="dt-parameter-value" id="dt-rinse-volume">--</div>
+                                        </div>
+                                    </div>
+                                    <div class="dt-parameter dt-power">
+                                        <div class="dt-parameter-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m13 2-8 12h6l-1 8 8-12h-6z"/></svg></div>
+                                        <div class="dt-parameter-text">
+                                            <div class="dt-parameter-label">Power Fail</div>
+                                            <div class="dt-parameter-value"><span id="dt-power-failure">--</span><span class="dt-parameter-unit">min</span></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </section>
 
-                            <section class="dt-run-equip" aria-label="Equipment status">
-                                <div class="dt-equip dt-equip-heater is-off" id="dt-heater-equip" data-on="false">
-                                    <span class="dt-equip-label">Heater</span>
-                                    <strong class="dt-equip-state" id="dt-heater-label">Off</strong>
+                            <section class="dt-panel dt-equipment-panel" aria-label="Equipment status">
+                                <div class="dt-panel-header">
+                                    <div class="dt-panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg></div>
+                                    <div class="dt-panel-title">Equipment Status</div>
                                 </div>
-                                <div class="dt-equip dt-equip-pump is-off" id="dt-pump-equip" data-on="false">
-                                    <span class="dt-equip-label">Circulation Pump</span>
-                                    <strong class="dt-equip-state" id="dt-pump-label">Off</strong>
-                                </div>
-                                <div class="dt-equip dt-equip-paddle is-off" id="dt-paddle-equip" data-on="false">
-                                    <span class="dt-equip-label">Stirrer</span>
-                                    <strong class="dt-equip-state" id="dt-paddle-label">Off</strong>
-                                    <span id="dt-paddle-rotor" class="dt-paddle-rotor" hidden aria-hidden="true"></span>
+                                <div class="dt-equipment-content">
+                                    <div class="dt-equipment-item dt-heater is-off" id="dt-heater-equip" data-on="false">
+                                        <div class="dt-equipment-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"/><path d="M14 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"/></svg></div>
+                                        <div class="dt-equipment-name">Heater</div>
+                                        <div class="dt-equipment-status" id="dt-heater-label">Off</div>
+                                    </div>
+                                    <div class="dt-equipment-item dt-pump is-off" id="dt-pump-equip" data-on="false">
+                                        <div class="dt-equipment-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13-6"/><path d="m17 3v4h-4"/><path d="M20 12a8 8 0 0 1-13 6"/><path d="m7 21v-4h4"/></svg></div>
+                                        <div class="dt-equipment-name">Circulation Pump</div>
+                                        <div class="dt-equipment-status" id="dt-pump-label">Off</div>
+                                    </div>
+                                    <div class="dt-equipment-item dt-stirrer is-off" id="dt-paddle-equip" data-on="false">
+                                        <div class="dt-equipment-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 10V4"/><path d="M10.5 13 5 16"/><path d="M13.5 13 19 16"/></svg></div>
+                                        <div class="dt-equipment-name">Stirrer</div>
+                                        <div class="dt-equipment-status" id="dt-paddle-label">Off</div>
+                                        <span id="dt-paddle-rotor" class="dt-paddle-rotor" hidden aria-hidden="true"></span>
+                                    </div>
+                                    <div class="dt-shortcuts">
+                                        <button type="button" class="dt-shortcut" id="dt-vessel-info-btn" onclick="openVesselTemperaturePage('test-run')" title="Vessel temperatures" aria-label="Vessel temperatures">
+                                            <div class="dt-shortcut-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h10"/><path d="M9 3v5l-2 9a4 4 0 0 0 4 4h2a4 4 0 0 0 4-4l-2-9V3"/><path d="M8 14h8"/></svg></div>
+                                            <div class="dt-shortcut-name">Vessels</div>
+                                            <div class="dt-shortcut-arrow">›</div>
+                                        </button>
+                                        <button type="button" class="dt-shortcut" id="dt-shaft-info-btn" onclick="openShaftPositionPage()" title="Shaft position" aria-label="Shaft position">
+                                            <div class="dt-shortcut-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="M8 13h8"/><path d="M5 16a7 7 0 0 0 14 0"/><path d="M12 16v5"/></svg></div>
+                                            <div class="dt-shortcut-name">Shaft</div>
+                                            <div class="dt-shortcut-arrow">›</div>
+                                        </button>
+                                    </div>
                                 </div>
                             </section>
 
-                            <section class="dt-run-recipe" aria-label="Recipe identity">
-                                <div class="dt-run-spec">
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">AR No</span><strong class="dt-run-spec-val" id="dt-ar-number">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Batch No</span><strong class="dt-run-spec-val" id="dt-batch-number">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Batch Size</span><strong class="dt-run-spec-val" id="dt-batch-size">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">USP</span><strong class="dt-run-spec-val" id="dt-usp">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Sample Drop</span><strong class="dt-run-spec-val" id="dt-mode">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Replenish</span><strong class="dt-run-spec-val" id="dt-replenishment">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Media</span><strong class="dt-run-spec-val" id="dt-media">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Media Vol</span><strong class="dt-run-spec-val" id="dt-media-volume">--</strong></div>
-                                    <div class="dt-run-spec-item"><span class="dt-run-spec-key">Media pH</span><strong class="dt-run-spec-val" id="dt-media-ph">--</strong></div>
+                            <section class="dt-panel dt-recipe-panel" aria-label="Recipe identity">
+                                <div class="dt-panel-header">
+                                    <div class="dt-panel-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M14 3v4h4"/><path d="M9 11h6"/><path d="M9 15h6"/></svg></div>
+                                    <div class="dt-panel-title">Recipe / Run Information</div>
+                                </div>
+                                <div class="dt-recipe-content">
+                                    <div class="dt-recipe-grid">
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">AR No</span><span class="dt-recipe-value" id="dt-ar-number">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Batch No</span><span class="dt-recipe-value" id="dt-batch-number">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">USP</span><span class="dt-recipe-value" id="dt-usp">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Batch Size</span><span class="dt-recipe-value" id="dt-batch-size">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Media</span><span class="dt-recipe-value" id="dt-media">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Sample Drop</span><span class="dt-recipe-value" id="dt-mode">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Media pH</span><span class="dt-recipe-value" id="dt-media-ph">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Media Volume</span><span class="dt-recipe-value" id="dt-media-volume">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Replenishment</span><span class="dt-recipe-value" id="dt-replenishment">--</span></div>
+                                        <div class="dt-recipe-row"><span class="dt-recipe-label">Mode</span><span class="dt-recipe-value">Automatic</span></div>
+                                    </div>
+                                    <div class="dt-run-actions">
+                                        <button type="button" class="btn btn-secondary dt-pause" id="dt-pause-btn" onclick="dissolutionTestPause()" style="display:none;">Pause</button>
+                                        <button type="button" class="btn btn-danger dt-abort" id="dt-abort-btn" onclick="dissolutionTestAbort()" style="display:none;">Abort</button>
+                                        <button type="button" class="dt-preheat" id="dt-start-btn" onclick="dissolutionTestPrimaryAction()">Preheat</button>
+                                    </div>
                                 </div>
                             </section>
+
                         </div>
 
                         <div id="dt-status-banner" class="dt-status-banner" hidden aria-hidden="true"></div>
                         <span id="dt-recipe-name" hidden aria-hidden="true"></span>
                         <span id="dt-run-state" class="dt-run-state" hidden aria-hidden="true"></span>
-
-                        <footer class="dt-run-actions">
-                            <div class="dt-run-actions-btns">
-                                <button type="button" class="btn btn-secondary" id="dt-pause-btn" onclick="dissolutionTestPause()" style="display:none;">Pause</button>
-                                <button type="button" class="btn btn-primary" id="dt-start-btn" onclick="dissolutionTestPrimaryAction()">Preheat</button>
-                            </div>
-                        </footer>
                     </div>
                 </div>
 
@@ -1995,6 +2066,16 @@
                             </div>
                             <h3>Hardware Initialise</h3>
                         </button>
+                        <button class="settings-card settings-heater" onclick="openHeaterControlPage()">
+                            <div class="settings-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M7 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"></path>
+                                    <path d="M14 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"></path>
+                                </svg>
+                            </div>
+                            <h3>Heater</h3>
+                        </button>
                         <button class="settings-card settings-cleaning" onclick="goToPage('cleaning-cycle')">
                             <div class="settings-icon">
                                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -2046,6 +2127,51 @@
                                     onclick="startHardwareInitialise()">Initialize</button>
                                 <button type="button" class="btn btn-secondary" id="hw-init-done-btn"
                                     onclick="goToPage('settings')" disabled>Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manual heater control (Settings) -->
+                <div class="page" id="page-heater-control">
+                    <div class="heater-ctrl-page">
+                        <div class="heater-ctrl-card">
+                            <div class="heater-ctrl-visual" id="heater-ctrl-visual" data-on="false">
+                                <div class="heater-ctrl-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24"><path d="M7 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"/><path d="M14 3c0 3 3 3 3 6s-3 3-3 6 3 3 3 6"/></svg>
+                                </div>
+                                <div class="heater-ctrl-state" id="heater-ctrl-state">Off</div>
+                            </div>
+
+                            <div class="heater-ctrl-fields">
+                                <div class="heater-ctrl-field form-group">
+                                    <label for="heater-ctrl-temp">Set Temperature (°C)</label>
+                                    <input type="number" id="heater-ctrl-temp" class="input-field"
+                                        min="20" max="50" step="0.1" value="37.0" placeholder="e.g. 37.0"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                </div>
+                                <div class="heater-ctrl-live">
+                                    <div class="heater-ctrl-live-label">Bath</div>
+                                    <div class="heater-ctrl-live-value" id="heater-ctrl-bath">—</div>
+                                </div>
+                            </div>
+
+                            <div class="heater-ctrl-toggle" role="group" aria-label="Heater power">
+                                <button type="button" id="heater-ctrl-off" class="heater-ctrl-opt is-active"
+                                    aria-pressed="true" onclick="setHeaterControlPower(false)">OFF</button>
+                                <button type="button" id="heater-ctrl-on" class="heater-ctrl-opt"
+                                    aria-pressed="false" onclick="setHeaterControlPower(true)">ON</button>
+                            </div>
+
+                            <div class="heater-ctrl-status" id="heater-ctrl-status" aria-live="polite">
+                                Set temperature, then turn the heater ON to send commands to the ESP.
+                            </div>
+
+                            <div class="heater-ctrl-actions">
+                                <button type="button" class="btn btn-primary" id="heater-ctrl-apply-btn"
+                                    onclick="applyHeaterControlTemp()">Apply Temp</button>
+                                <button type="button" class="btn btn-secondary"
+                                    onclick="goToPage('settings')">Back</button>
                             </div>
                         </div>
                     </div>
@@ -2580,8 +2706,8 @@
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=7"></script>
-    <script src="disso_client.js?v=1"></script>
-    <script src="script.js?v=90"></script>
+    <script src="disso_client.js?v=4"></script>
+    <script src="script.js?v=96"></script>
     <script src="validation_suite.js?v=1"></script>
 </body>
 

@@ -5133,6 +5133,76 @@ def disso_hw_preheat():
     return jsonify(result), 200 if result.get("ok") else 400
 
 
+@app.route("/api/hardware/disso/temperature/set", methods=["POST"])
+def disso_hw_set_temp():
+    """Manual #SET-TEMP-xx.x* (Settings heater card)."""
+    gate = _require_auth()
+    if gate:
+        return gate
+    body = request.get_json(force=True, silent=True) or {}
+    temperature = body.get("temperature", body.get("temp"))
+    result = disso_cmd_hardware.set_temp(temperature)
+    if result.get("ok"):
+        _audit(None, None, "Set bath temperature", "{:.1f} C".format(float(result.get("temperature") or temperature or 0)))
+    return jsonify(result), 200 if result.get("ok") else 400
+
+
+@app.route("/api/hardware/disso/heater/on", methods=["POST"])
+def disso_hw_heater_on():
+    """SET-TEMP (optional) + PRE-HEAT for Settings heater ON."""
+    gate = _require_auth()
+    if gate:
+        return gate
+    try:
+        st = disso_test_service.get_state()
+        status = str((st or {}).get("runStatus") or "").upper()
+        if (st or {}).get("active") and status in ("RUNNING", "PAUSED", "PREHEATING"):
+            return jsonify({
+                "ok": False,
+                "error": "Cannot control heater manually while a dissolution test is active.",
+            }), 409
+    except Exception:
+        pass
+    body = request.get_json(force=True, silent=True) or {}
+    temperature = body.get("temperature", body.get("temp"))
+    wait_done = str(body.get("waitDone") or "").lower() in ("1", "true", "yes")
+    timeout = body.get("timeout")
+    try:
+        timeout_f = float(timeout) if timeout is not None else 180.0
+    except (TypeError, ValueError):
+        timeout_f = 180.0
+    result = disso_cmd_hardware.start_heater(
+        temperature=temperature,
+        wait_done=wait_done,
+        timeout=timeout_f,
+    )
+    if result.get("ok"):
+        _audit(None, None, "Heater on", "temp {}".format(result.get("temperature") or temperature or "—"))
+    return jsonify(result), 200 if result.get("ok") else 400
+
+
+@app.route("/api/hardware/disso/heater/off", methods=["POST"])
+def disso_hw_heater_off():
+    """#STOP-HEAT* for Settings heater OFF."""
+    gate = _require_auth()
+    if gate:
+        return gate
+    try:
+        st = disso_test_service.get_state()
+        status = str((st or {}).get("runStatus") or "").upper()
+        if (st or {}).get("active") and status in ("RUNNING", "PAUSED"):
+            return jsonify({
+                "ok": False,
+                "error": "Cannot turn heater off while a dissolution test is running or paused.",
+            }), 409
+    except Exception:
+        pass
+    result = disso_cmd_hardware.stop_heater()
+    if result.get("ok"):
+        _audit(None, None, "Heater off", "STOP-HEAT")
+    return jsonify(result), 200 if result.get("ok") else 400
+
+
 @app.route("/api/hardware/disso/test/pause", methods=["POST"])
 def disso_hw_pause():
     gate = _require_auth()

@@ -131,6 +131,47 @@
     });
   };
 
+  window.dissoSetTemp = function (temperature) {
+    return api('/api/hardware/disso/temperature/set', {
+      method: 'POST',
+      body: { temperature: temperature }
+    }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        throw new Error((res.body && res.body.error) || 'Set temperature failed');
+      }
+      return res.body;
+    });
+  };
+
+  window.dissoHeaterOn = function (temperature, opts) {
+    opts = opts || {};
+    return api('/api/hardware/disso/heater/on', {
+      method: 'POST',
+      body: {
+        temperature: temperature,
+        waitDone: !!opts.waitDone,
+        timeout: opts.timeout != null ? opts.timeout : 180
+      }
+    }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        throw new Error((res.body && res.body.error) || 'Heater on failed');
+      }
+      return res.body;
+    });
+  };
+
+  window.dissoHeaterOff = function () {
+    return api('/api/hardware/disso/heater/off', {
+      method: 'POST',
+      body: {}
+    }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        throw new Error((res.body && res.body.error) || 'Heater off failed');
+      }
+      return res.body;
+    });
+  };
+
   window.dissoBeep = function (count) {
     return api('/api/hardware/disso/beep', {
       method: 'POST',
@@ -179,7 +220,7 @@
     window._dissoServerState = st;
     if (typeof _dtSetText === 'function') {
       if (st.stepCount != null) {
-        var stepLabel = ((st.stepIndex || 0) + 1) + '/' + st.stepCount;
+        var stepLabel = ((st.stepIndex || 0) + 1) + ' / ' + st.stepCount;
         _dtSetText('dt-current-step', stepLabel);
         _dtSetText('dt-step', stepLabel);
       }

@@ -12806,6 +12806,33 @@ window.applyPreheatDoneFromEsp = function () {
     // Bound per-session inside dissolutionPreheatStart; no-op until then.
 };
 
+function dissolutionPreheatStop() {
+    var dt = _dissolutionTest;
+    if (!dt || !dt.preheating || dt.preheatDone || dt.running) return;
+    _dtStopPreheatTimer();
+    // Ignore a late PRE-DONE after operator cancels.
+    window.applyPreheatDoneFromEsp = function () {};
+    dt.preheating = false;
+    dt.preheatDone = false;
+    dt.heaterForcedOn = false;
+    dt.preheatTimerId = null;
+    _dtSetPrimaryButton('preheat');
+    _dtSyncEquipVisuals();
+    _dtSyncStirrerLock();
+    if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    _dtSetStatus('Preheat stopped. Press Preheat to begin again.', 'ready');
+    var stopFn = (typeof window.dissoHeaterOff === 'function') ? window.dissoHeaterOff : null;
+    if (!stopFn) return;
+    stopFn().then(function () {
+        if (typeof logAuditEvent === 'function') {
+            logAuditEvent('Preheat stopped', 'Operator cancelled preheat (#STOP-HEAT*)', { eventType: 'lifecycle' });
+        }
+    }).catch(function (err) {
+        showAppModal(friendlyHardwareError(err, 'Could not stop heater. Check connection.'), 'Preheat');
+    });
+}
+
 function _dtUpdateProgress() {
     var dt = _dissolutionTest;
     var pctEl = _dtEl('dt-progress-pct');
@@ -12955,10 +12982,10 @@ function _dtSetPrimaryButton(mode) {
         return;
     }
     if (mode === 'preheating') {
-        startBtn.textContent = 'Preheating…';
-        startBtn.disabled = true;
+        startBtn.textContent = 'Stop Preheat';
+        startBtn.disabled = false;
         startBtn.classList.add('dt-start-preheating');
-        startBtn.setAttribute('data-dt-action', 'preheat');
+        startBtn.setAttribute('data-dt-action', 'stop-preheat');
         return;
     }
     if (mode === 'disabled') {
@@ -13042,6 +13069,10 @@ function dissolutionTestPrimaryAction() {
     var action = startBtn ? (startBtn.getAttribute('data-dt-action') || 'start') : 'start';
     if (action === 'abort') {
         dissolutionTestAbort();
+        return;
+    }
+    if (action === 'stop-preheat') {
+        dissolutionPreheatStop();
         return;
     }
     if (action === 'preheat') {
@@ -13631,15 +13662,16 @@ function _dtStartTicker() {
     _dtUpdateProgress();
     dt.timerId = setInterval(function () {
         if (!_dissolutionTest || !_dissolutionTest.running || _dissolutionTest.paused) return;
+        // Server-authoritative ESP runs: display comes from state poll (wall-clock).
+        // Do not locally decrement — that fought the poll and amplified drift.
+        if (window._dissoServerRunActive) {
+            if (typeof _dtUpdateProgress === 'function') _dtUpdateProgress();
+            return;
+        }
         _dissolutionTest.remainingSec = Math.max(0, (_dissolutionTest.remainingSec || 0) - 1);
         // Only the left Step Timer counts down; Step Duration / Total Duration stay fixed.
         _dtSetText('dt-hero-timer', _dtFormatHms(_dissolutionTest.remainingSec));
         _dtUpdateProgress();
-        // Server-authoritative ESP runs: do not locally advance/complete steps
-        // (END-TEST / remainingSec come from disso_test_service). Still tick UI.
-        if (window._dissoServerRunActive) {
-            return;
-        }
         _dtAppendTempLogSample();
         if (_dissolutionTest.remainingSec <= 0) _dtOnStepComplete();
     }, 1000);

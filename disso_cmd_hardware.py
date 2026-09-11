@@ -198,12 +198,27 @@ def _reader_loop() -> None:
             time.sleep(0.5)
 
 
+_last_sample_phase: Optional[str] = None
+
+
+def _emit_sample_phase(phase: str, raw: str) -> None:
+    """Emit SAMPLE-* / AIR-CLEAN* only on phase transitions (avoid UART spam)."""
+    global _last_sample_phase
+    if phase == _last_sample_phase:
+        return
+    _last_sample_phase = phase
+    _emit_event({"type": phase, "raw": raw})
+
+
 def _handle_rx_inner(inner: str) -> None:
     upper = (inner or "").upper()
+    raw = inner or ""
     if "END-TEST" in upper:
         with _sim_lock:
             _sim["running"] = False
             _sim["paused"] = False
+        global _last_sample_phase
+        _last_sample_phase = None
         _emit_event({"type": "END-TEST", "raw": inner})
     elif "PRE-DONE" in upper:
         _emit_event({"type": "PRE-DONE", "raw": inner})
@@ -217,6 +232,27 @@ def _handle_rx_inner(inner: str) -> None:
         _emit_event({"type": "CLEAN-DONE", "raw": inner})
     elif "ENT-TSML-VL" in upper:
         _emit_event({"type": "SAMPLE-CAL-READY", "raw": inner})
+    else:
+        # Sampling progress (forwarded bath/sampler lines) — phase transitions only.
+        if (
+            "SMP-START" in upper
+            or "SMP-AUTO" in upper
+            or "FC: COLLECT" in upper
+            or ("=== FULL CYCLE " in upper and "COMPLETE" not in upper)
+        ):
+            _emit_sample_phase("SAMPLE-COLLECT", raw)
+        elif (
+            "DISP: FLUSH" in upper
+            or "FC: FILLING WAIT" in upper
+            or ("=== DISPENSE" in upper and "DONE" not in upper)
+        ):
+            _emit_sample_phase("SAMPLE-FLUSH", raw)
+        elif "FULL CYCLE COMPLETE" in upper or upper.startswith("CMT,"):
+            _emit_sample_phase("SAMPLE-CYCLE-DONE", raw)
+        elif "AIR CLEAN DONE" in upper:
+            _emit_sample_phase("AIR-CLEAN-DONE", raw)
+        elif "AIR CLEAN" in upper or "=== AIR CLEAN" in upper:
+            _emit_sample_phase("AIR-CLEAN", raw)
     # Always enqueue for ACK waiters
     try:
         _pending_acks.put_nowait(inner)

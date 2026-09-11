@@ -265,6 +265,7 @@ static void bathLoadRecipeSeq(float temp, uint8_t steps,
 }
 
 static void bathPreHeat()      { bathSendBody("PRE-HEAT"); }
+static void bathStopHeat()     { bathSendBody("STOP-HEAT"); }
 static void bathStartTest() {
     // Immediate / short-gap — do not sit behind a long queue delay
     bathEnqueueFrame("#START-TEST*", 5);

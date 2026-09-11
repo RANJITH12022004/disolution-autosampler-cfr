@@ -1414,10 +1414,15 @@ def touch_app_clean_stop_flag():
 # =================== TEST RUN DATA ==========================
 
 
-def save_test_run_data(test_data: Dict[str, Any]):
-    """Save quick test run data."""
+def save_test_run_data(test_data: Dict[str, Any], compact: bool = True):
+    """Save in-progress test checkpoint (compact JSON for fast USB writes)."""
     test_path = _get_storage_path("test_run.json")
-    _save_json_file(test_path, test_data)
+    test_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(test_path, "w", encoding="utf-8") as f:
+        if compact:
+            json.dump(test_data, f, indent=None, separators=(",", ":"), ensure_ascii=False)
+        else:
+            json.dump(test_data, f, indent=2, ensure_ascii=False)
 
 
 def get_test_run_data() -> Dict[str, Any]:

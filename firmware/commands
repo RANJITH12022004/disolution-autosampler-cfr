@@ -64,6 +64,8 @@ Flush ml/step → then `#RECIPE,ACK*`
 One-shot recipe
 `#PRE-HEAT*`
 Preheat
+`#STOP-HEAT*`
+Stop bath heater (cancel preheat / Settings heater OFF)
 `#START-TEST*`
 Start test
 `#PAUSE-TEST*` / `#RESUME-TEST*` / `#STOP-TEST*`

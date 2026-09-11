@@ -10764,9 +10764,13 @@ body.keyboard-open {
     border-color: #19c982;
 }
 #dt-start-btn.dt-start-preheating {
-    background: #075a8f;
-    border-color: #0879c5;
-    opacity: 0.95;
+    background: #ea580c;
+    border-color: #c2410c;
+    opacity: 1;
+    cursor: pointer;
+}
+#dt-start-btn.dt-start-preheating:hover {
+    background: #c2410c;
 }
 #dt-start-btn.is-abort {
     background: #b91c1c;

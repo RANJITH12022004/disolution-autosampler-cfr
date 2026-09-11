@@ -51,12 +51,11 @@ def parse_frames(buffer: str) -> Tuple[List[str], str]:
 
 
 def _fmt_hms_mmss(seconds: int) -> str:
+    """Format duration for ESP DUR frames as always hh:mm:ss (e.g. 00:02:14)."""
     seconds = max(0, int(seconds))
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
-    if h > 0:
-        return "{:02d}:{:02d}:{:02d}".format(h, m, s)
-    return "{:02d}:{:02d}".format(m, s)
+    return "{:02d}:{:02d}:{:02d}".format(h, m, s)
 
 
 def _step_duration_seconds(step: Dict[str, Any]) -> int:
@@ -207,7 +206,7 @@ def build_recipe_frames(
     rpm_parts = ["{}-{}".format(st["index"], st["rpm"]) for st in steps]
     frames.append(wrap("RPM," + ",".join(rpm_parts)))
 
-    # Firmware: #DUR,1-00:05,2-00:10* (every step indexed)
+    # Firmware: #DUR,1-00:00:05,2-00:00:10* (hh:mm:ss, every step indexed)
     dur_tokens: List[str] = []
     for st in steps:
         token = _fmt_hms_mmss(st["durationSeconds"])

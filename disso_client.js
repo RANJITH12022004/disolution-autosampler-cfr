@@ -27,23 +27,35 @@
   }
 
   function ensureResumeModal() {
-    if (document.getElementById('disso-resume-modal')) return;
+    var existing = document.getElementById('disso-resume-modal');
+    if (existing && existing.getAttribute('data-disso-resume-v') !== '2') {
+      existing.remove();
+      existing = null;
+    }
+    if (existing) return;
     var wrap = document.createElement('div');
     wrap.id = 'disso-resume-modal';
+    wrap.setAttribute('data-disso-resume-v', '2');
     wrap.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
+    // Inline colors only — global .btn-secondary is white-on-glass (invisible on white card).
     wrap.innerHTML =
-      '<div style="background:#fff;max-width:520px;width:92%;padding:24px 28px;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.25);font-family:inherit;">' +
-      '<h2 style="margin:0 0 12px;font-size:1.25rem;">Test in progress</h2>' +
-      '<p id="disso-resume-msg" style="margin:0 0 20px;line-height:1.45;"></p>' +
+      '<div style="background:#ffffff;max-width:520px;width:92%;padding:24px 28px;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.25);font-family:inherit;color:#0f172a;">' +
+      '<h2 style="margin:0 0 12px;font-size:1.25rem;color:#0f172a;font-weight:700;">Test in progress</h2>' +
+      '<p id="disso-resume-msg" style="margin:0 0 20px;line-height:1.45;color:#1e293b;"></p>' +
       '<div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">' +
-      '<button type="button" id="disso-resume-abort" class="btn btn-secondary">Abort</button>' +
-      '<button type="button" id="disso-resume-continue" class="btn btn-primary">Continue</button>' +
+      '<button type="button" id="disso-resume-abort" style="padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid #94a3b8;background:#e2e8f0;color:#0f172a;">Abort</button>' +
+      '<button type="button" id="disso-resume-continue" style="padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:none;background:#2563eb;color:#ffffff;">Continue</button>' +
       '</div></div>';
     document.body.appendChild(wrap);
     document.getElementById('disso-resume-continue').onclick = function () {
+      var contBtn = document.getElementById('disso-resume-continue');
+      var abortBtn = document.getElementById('disso-resume-abort');
+      if (contBtn) contBtn.disabled = true;
+      if (abortBtn) abortBtn.disabled = true;
       api('/api/disso/test/continue', { method: 'POST' }).then(function (res) {
-        hideResumeModal();
         if (!res.ok || !(res.body && res.body.ok)) {
+          if (contBtn) contBtn.disabled = false;
+          if (abortBtn) abortBtn.disabled = false;
           if (typeof showAppModal === 'function') {
             var msg = (typeof window.friendlyHardwareError === 'function')
               ? window.friendlyHardwareError((res.body && res.body.error) || '', 'Could not continue test.')
@@ -52,18 +64,41 @@
           }
           return;
         }
+        hideResumeModal();
+        var st = (res.body && res.body.state) || {};
+        restoreTestRunFromServerState(st);
         if (typeof goToPage === 'function') goToPage('test-run');
         startStatePolling();
         if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+      }).catch(function () {
+        if (contBtn) contBtn.disabled = false;
+        if (abortBtn) abortBtn.disabled = false;
+        if (typeof showAppModal === 'function') {
+          showAppModal('Could not continue test.', 'Test');
+        }
       });
     };
     document.getElementById('disso-resume-abort').onclick = function () {
       var doAbort = function () {
+        var contBtn = document.getElementById('disso-resume-continue');
+        var abortBtn = document.getElementById('disso-resume-abort');
+        if (contBtn) contBtn.disabled = true;
+        if (abortBtn) abortBtn.disabled = true;
         api('/api/disso/test/claim-abort', { method: 'POST' }).then(function (res) {
           hideResumeModal();
           if (typeof goToPage === 'function') goToPage('home');
           if (res.body && res.body.reportId && typeof finishTestRunReportSaved === 'function') {
             finishTestRunReportSaved(res.body.reportId);
+          } else if (!res.ok || !(res.body && res.body.ok)) {
+            if (typeof showAppModal === 'function') {
+              showAppModal((res.body && res.body.error) || 'Could not abort test.', 'Test');
+            }
+          }
+        }).catch(function () {
+          if (contBtn) contBtn.disabled = false;
+          if (abortBtn) abortBtn.disabled = false;
+          if (typeof showAppModal === 'function') {
+            showAppModal('Could not abort test.', 'Test');
           }
         });
       };
@@ -74,6 +109,53 @@
         doAbort();
       }
     };
+  }
+
+  /** After power-claim Continue: rebuild local test UI from server state (includes recipe). */
+  function restoreTestRunFromServerState(st) {
+    st = st || {};
+    var recipe = st.recipe;
+    if (!recipe || typeof initDissolutionTestRun !== 'function') {
+      return false;
+    }
+    initDissolutionTestRun(recipe);
+    var dt = window._dissolutionTest;
+    if (!dt) return false;
+    dt.needsPreheat = false;
+    dt.preheatDone = true;
+    dt.preheating = false;
+    dt.recipeUploaded = true;
+    dt.preparingStart = false;
+    dt.stepIndex = parseInt(st.stepIndex, 10) || 0;
+    if (st.setSecInStep != null) dt.setSec = parseInt(st.setSecInStep, 10) || 0;
+    if (st.remainingSecInStep != null) dt.remainingSec = parseInt(st.remainingSecInStep, 10) || 0;
+    if (typeof _dtApplyStep === 'function') {
+      _dtApplyStep(dt.stepIndex, false);
+    }
+    if (st.setSecInStep != null) dt.setSec = parseInt(st.setSecInStep, 10) || dt.setSec;
+    if (st.remainingSecInStep != null) dt.remainingSec = parseInt(st.remainingSecInStep, 10) || dt.remainingSec;
+    if (typeof _dtSetText === 'function' && typeof _dtFormatHms === 'function') {
+      _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec || 0));
+    }
+    var rs = String(st.runStatus || '').toUpperCase();
+    if (rs === 'PAUSED') {
+      dt.running = true;
+      dt.paused = true;
+      if (typeof _dtSetControlsPaused === 'function') _dtSetControlsPaused();
+      if (typeof _dtSetStatus === 'function') _dtSetStatus('Test paused', 'paused');
+    } else {
+      dt.running = true;
+      dt.paused = false;
+      if (typeof _dtSetControlsRunning === 'function') _dtSetControlsRunning();
+      if (typeof _dtSetStatus === 'function') {
+        _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + (dt.steps.length || '?'), 'running');
+      }
+      if (typeof _dtStartTicker === 'function') _dtStartTicker();
+    }
+    window._dissoServerRunActive = true;
+    if (typeof _dtUpdateProgress === 'function') _dtUpdateProgress();
+    if (typeof _dtRefreshDurationTiles === 'function') _dtRefreshDurationTiles();
+    return true;
   }
 
   function showResumeModal(state) {
@@ -225,9 +307,81 @@
     return api('/api/disso/test/abort', { method: 'POST' });
   };
 
+  var _samplingOverlayPhase = null;
+  var _runEndedApplied = false;
+
+  function showSamplingOverlay(message) {
+    if (typeof showLoadingOverlay === 'function') {
+      showLoadingOverlay('Sampling', message || 'Please wait…', { cancellable: false });
+    }
+  }
+
+  function hideSamplingOverlay() {
+    _samplingOverlayPhase = null;
+    if (typeof hideLoadingOverlay === 'function') {
+      hideLoadingOverlay();
+    }
+  }
+
+  function applySamplingPhaseEvent(type) {
+    if (type === 'SAMPLE-COLLECT') {
+      if (_samplingOverlayPhase === 'collect') return;
+      _samplingOverlayPhase = 'collect';
+      showSamplingOverlay('Collecting sample…');
+    } else if (type === 'SAMPLE-FLUSH') {
+      if (_samplingOverlayPhase === 'flush') return;
+      _samplingOverlayPhase = 'flush';
+      showSamplingOverlay('Flushing sample…');
+    } else if (type === 'AIR-CLEAN') {
+      if (_samplingOverlayPhase === 'air') return;
+      _samplingOverlayPhase = 'air';
+      showSamplingOverlay('Air cleaning…');
+    } else if (type === 'SAMPLE-CYCLE-DONE' || type === 'AIR-CLEAN-DONE') {
+      hideSamplingOverlay();
+    }
+  }
+
+  function applyDissolutionRunEndedFromServer(st) {
+    st = st || {};
+    if (_runEndedApplied) return;
+    _runEndedApplied = true;
+    hideSamplingOverlay();
+    stopStatePolling();
+    disarmAutoTemp('test-ended');
+    window._dissoServerRunActive = false;
+    var dt = window._dissolutionTest;
+    if (dt) {
+      if (typeof _dtStopTimer === 'function') _dtStopTimer();
+      dt.running = false;
+      dt.paused = false;
+      dt.preheating = false;
+      dt.preheatDone = false;
+      dt.preparingStart = false;
+      dt._aborting = false;
+      if (typeof _dtClearThermalFlags === 'function') _dtClearThermalFlags();
+      if (typeof _dtSetControlsIdle === 'function') _dtSetControlsIdle();
+      if (typeof _dtSetPrimaryButton === 'function') _dtSetPrimaryButton('disabled');
+      if (typeof _dtSetStatus === 'function') {
+        var aborted = String(st.runStatus || '').toUpperCase() === 'ABORTED';
+        _dtSetStatus(aborted ? 'Test aborted' : 'Test completed', aborted ? 'aborted' : 'done');
+      }
+    }
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
+    var rid = st.lastReportId || st.reportId;
+    if (rid && typeof finishTestRunReportSaved === 'function') {
+      try { finishTestRunReportSaved(rid); } catch (e) { /* ignore */ }
+    }
+  }
+
+  window.applyDissolutionRunEndedFromServer = applyDissolutionRunEndedFromServer;
+
   function applyStateToUi(st) {
     if (!st) return;
     window._dissoServerState = st;
+    if (st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING')) {
+      _runEndedApplied = false;
+    }
     window._dissoServerRunActive = !!(st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING'));
     var dt = window._dissolutionTest;
     if (dt && dt._aborting) {
@@ -264,13 +418,8 @@
         var remHms = (typeof formatHms === 'function')
           ? formatHms(st.remainingSecInStep)
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.remainingSecInStep) : String(st.remainingSecInStep) + 's');
-        // Left Step Timer only — live remaining for current step.
         _dtSetText('dt-hero-timer', remHms);
       }
-      if (st.setSecInStep != null) {
-        // keep setSec already synced on dt above
-      }
-      // Total Duration + Step Duration tiles from local recipe / step set length.
       if (typeof _dtRefreshDurationTiles === 'function') {
         _dtRefreshDurationTiles();
       } else if (st.setSecInStep != null) {
@@ -284,19 +433,16 @@
         if (typeof _dtSetStatus === 'function') {
           if (rs === 'running') _dtSetStatus('Test running… Step ' + ((st.stepIndex || 0) + 1) + '/' + (st.stepCount || '?'), 'running');
           else if (rs === 'paused') _dtSetStatus('Test paused', 'paused');
-          else _dtSetStatus(st.runStatus, rs);
+          else if (rs !== 'complete' && rs !== 'aborted') _dtSetStatus(st.runStatus, rs);
         }
       }
     }
     if (typeof _dtUpdateProgress === 'function') {
       _dtUpdateProgress();
     }
-    var temps = st.temps || {};
-    applyLiveTempsToUi(temps);
+    applyLiveTempsToUi(st.temps || {});
     if (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED') {
-      stopStatePolling();
-      disarmAutoTemp('test-ended');
-      window._dissoServerRunActive = false;
+      applyDissolutionRunEndedFromServer(st);
     }
   }
 
@@ -429,6 +575,30 @@
         if (typeof window.applyPreheatDoneFromEsp === 'function') {
           window.applyPreheatDoneFromEsp(evt);
         }
+      } else if (
+        evt.type === 'SAMPLE-COLLECT' ||
+        evt.type === 'SAMPLE-FLUSH' ||
+        evt.type === 'SAMPLE-CYCLE-DONE' ||
+        evt.type === 'AIR-CLEAN' ||
+        evt.type === 'AIR-CLEAN-DONE'
+      ) {
+        applySamplingPhaseEvent(evt.type);
+      } else if (evt.type === 'END-TEST') {
+        hideSamplingOverlay();
+        var tryEnd = function (attempt) {
+          fetchStateNow().then(function (st) {
+            if (st && (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED')) {
+              applyDissolutionRunEndedFromServer(st);
+              return;
+            }
+            if (attempt < 6) {
+              setTimeout(function () { tryEnd(attempt + 1); }, 300);
+            } else {
+              applyDissolutionRunEndedFromServer({ runStatus: 'COMPLETE' });
+            }
+          });
+        };
+        tryEnd(0);
       }
     });
   }

@@ -524,6 +524,47 @@ def is_temp_ack(inner: str) -> bool:
     return upper in ("TEMP", "TEMP-A-1SEC", "STATUES", "STATUS")
 
 
+def parse_test_sync(inner: str):
+    """Parse #TEST-SYNC,ST-1,EL-31,REM-208,TOT-480,...* from bath ESP after PF-RESUME."""
+    s = (inner or "").strip()
+    if not s.upper().startswith("TEST-SYNC"):
+        return None
+    out = {}
+    for part in s.split(",")[1:]:
+        p = (part or "").strip()
+        up = p.upper()
+        try:
+            if up.startswith("ST-"):
+                out["stepIndex"] = max(0, int(p[3:]) - 1)
+            elif up.startswith("EL-"):
+                out["elapsedSec"] = max(0, int(p[3:]))
+            elif up.startswith("REM-"):
+                out["remainingSecInStep"] = max(0, int(p[4:]))
+            elif up.startswith("TOT-"):
+                out["totalRecipeSec"] = max(0, int(p[4:]))
+        except (TypeError, ValueError):
+            continue
+    return out if out else None
+
+
+def extract_esp_step_current(inner: str):
+    """Extract 1-based step number from PROBE-DOWN,ST-N / SMP-START,ST-N UART lines."""
+    s = (inner or "").strip()
+    if not s:
+        return None
+    upper = s.upper()
+    if "PROBE-DOWN" not in upper and "SMP-START" not in upper:
+        return None
+    for part in s.split(","):
+        p = (part or "").strip().upper()
+        if p.startswith("ST-"):
+            try:
+                return max(1, int(p[3:]))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def is_status_frame(inner: str) -> bool:
     """True when inner looks like a statues/status payload (not a bare ACK name)."""
     upper = (inner or "").strip().upper()

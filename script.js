@@ -6389,8 +6389,19 @@ function enableMember(id) {
     }
     showConfirmModal('Enable this account?', 'Enable Account').then(function (ok) {
         if (!ok) return;
+        var actorName = (window.currentUser && (window.currentUser.username || window.currentUser.name)) || '--';
+        var actorRole = (window.currentUser && window.currentUser.role) || '--';
+        logAuditEvent('User enable attempted', actorName + ' attempted to enable userID ' + id, {
+            eventType: 'compliance',
+            entityType: 'member',
+            entityId: id,
+            extra: { enabledBy: actorName, enabledByRole: actorRole, memberId: id }
+        });
         var headers = { 'Content-Type': 'application/json' };
         if (window.currentUser && window.currentUser.role) headers['X-User-Role'] = window.currentUser.role;
+        if (window.currentUser && (window.currentUser.username || window.currentUser.name)) {
+            headers['X-User-Username'] = window.currentUser.username || window.currentUser.name;
+        }
         fetch((API_BASE || '') + '/api/data/members/' + id + '/enable', { method: 'POST', headers: headers })
             .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { ok: r.ok, status: r.status, body: b }; }); })
             .then(function (res) {
@@ -6743,8 +6754,9 @@ function loadReports(filterType) {
                     name = 'Calibration' + (cst ? ' - ' + String(cst) : '');
                 }
                 if (!name) name = (r.recipe && r.recipe.productName) || 'Report ' + (r.id || (i + 1));
-                var created = r.createdAt || r.created || '';
-                if (created && created.length > 10) created = created.slice(0, 10) + ' ' + created.slice(11, 19);
+                var created = (typeof formatReportDate === 'function')
+                    ? formatReportDate(r.createdAt || r.created || '')
+                    : (r.createdAt || r.created || '');
                 row.innerHTML = '<td>' + (i + 1) + '</td><td>' + name + '</td><td>' + created + '</td><td><button class="reports-open-btn" onclick="openReportPreview(' + (r.id || 0) + ')">Open</button></td>';
                 tbody.appendChild(row);
             });
@@ -7696,15 +7708,21 @@ function escapeReportHtml(value) {
 
 function formatReportDate(isoStr) {
     if (!isoStr) return '--';
-    var d = new Date(isoStr);
-    if (isNaN(d.getTime())) return '--';
+    var s = String(isoStr).trim();
+    if (!s) return '--';
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (m) {
+        return m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5] + ':' + (m[6] || '00');
+    }
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s.replace('T', ' ');
     var dd = String(d.getDate()).padStart(2, '0');
     var mm = String(d.getMonth() + 1).padStart(2, '0');
     var yy = d.getFullYear();
     var h = String(d.getHours()).padStart(2, '0');
-    var m = String(d.getMinutes()).padStart(2, '0');
-    var s = String(d.getSeconds()).padStart(2, '0');
-    return dd + '/' + mm + '/' + yy + ' ' + h + ':' + m + ':' + s;
+    var min = String(d.getMinutes()).padStart(2, '0');
+    var sec = String(d.getSeconds()).padStart(2, '0');
+    return dd + '/' + mm + '/' + yy + ' ' + h + ':' + min + ':' + sec;
 }
 
 function populateReportPreview(preview) {

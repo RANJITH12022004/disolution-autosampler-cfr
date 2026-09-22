@@ -261,6 +261,42 @@ def _changed_fields(before_obj, after_obj):
     return changed
 
 
+
+
+def _member_login_actor(member, username=""):
+    """Audit actor for unauthenticated login attempts (user, role, member id)."""
+    if member and isinstance(member, dict):
+        uname = str(member.get("username") or username or "--").strip() or "--"
+        role = str(member.get("role") or "--").strip() or "--"
+        name = str(member.get("name") or uname).strip() or uname
+        member_id = member.get("id")
+    else:
+        uname = str(username or "--").strip() or "--"
+        role = "--"
+        name = uname
+        member_id = None
+    return {
+        "user": uname,
+        "role": role,
+        "name": name,
+        "memberId": member_id,
+    }
+
+
+def _login_attempt_identity_detail(member, username="", event=""):
+    """Human-readable identity string for login audit details."""
+    ident = _member_login_actor(member, username)
+    parts = []
+    if ident.get("memberId") is not None:
+        parts.append("userID={}".format(ident["memberId"]))
+    parts.append("username={}".format(ident["user"]))
+    parts.append("role={}".format(ident["role"]))
+    identity = " | ".join(parts)
+    event = str(event or "").strip()
+    if event:
+        return "{} | {}".format(event, identity)
+    return identity
+
 def _audit_event(
     *,
     action,
@@ -276,8 +312,14 @@ def _audit_event(
     signature=None,
     event_type="compliance",
     extra=None,
+    actor_override=None,
 ):
-    actor = _audit_actor()
+    actor = dict(actor_override or _audit_actor())
+    actor_user = str(actor.get("user") or actor.get("username") or actor.get("name") or "--").strip() or "--"
+    actor_role = str(actor.get("role") or "--").strip() or "--"
+    actor["user"] = actor_user
+    actor["role"] = actor_role
+    actor["name"] = str(actor.get("name") or actor_user).strip() or actor_user
     audit_time = _audit_time_fields()
     signature = signature or {}
     before_clean = _sanitize_audit_payload(before)
@@ -409,6 +451,29 @@ def _create_aborted_report_from_power_loss_checkpoint(session_username):
     data_service.clear_test_run_data()
     return 1
 
+
+
+def _is_active_test_checkpoint(cp) -> bool:
+    """True when test_run.json holds an in-progress Dissolution run worth recovering."""
+    if not isinstance(cp, dict) or not cp:
+        return False
+    if cp.get("type") != "test":
+        return False
+    status = str(cp.get("runStatus") or "").upper()
+    if cp.get("active") or status in (
+        "RUNNING", "PAUSED", "POWER_RESUME_PENDING", "READY", "PREHEAT", "FINALIZING",
+    ):
+        return True
+    return False
+
+
+def _should_mark_clean_shutdown() -> bool:
+    """False while a test checkpoint is active — power loss often delivers SIGTERM first."""
+    try:
+        return not _is_active_test_checkpoint(data_service.get_test_run_data())
+    except Exception:
+        return True
+
 def _startup_session_power_audit():
     """Power-cut / unclean restart: recover Dissolution from test_run.json; audit + abort by window."""
     try:
@@ -417,20 +482,11 @@ def _startup_session_power_audit():
         checkpoint = data_service.get_test_run_data()
         if not isinstance(checkpoint, dict):
             checkpoint = None
-        active_checkpoint = bool(
-            checkpoint
-            and checkpoint.get("type") == "test"
-            and str(checkpoint.get("runStatus") or "").upper()
-            in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING", "READY", "PREHEAT")
-        )
+        active_checkpoint = _is_active_test_checkpoint(checkpoint)
 
-        # Clean stop: do not auto-resume; clear leftover checkpoint so next boot is clean.
-        if had_clean_shutdown:
-            if active_checkpoint:
-                try:
-                    data_service.clear_test_run_data()
-                except Exception:
-                    pass
+        # Clean stop without an active test: skip recovery. Never clear a live checkpoint —
+        # SIGTERM from systemd before hard power-off can leave a stale clean-stop flag.
+        if had_clean_shutdown and not active_checkpoint:
             if pending and pending.get("powerAuditLogged"):
                 pending = dict(pending)
                 pending.pop("powerAuditLogged", None)
@@ -557,7 +613,8 @@ def _register_clean_shutdown_atexit():
 
     def _on_exit():
         try:
-            data_service.touch_app_clean_stop_flag()
+            if _should_mark_clean_shutdown():
+                data_service.touch_app_clean_stop_flag()
         except Exception:
             pass
 
@@ -571,7 +628,8 @@ def _register_clean_shutdown_signals():
 
     def _handler(signum, frame):
         try:
-            data_service.touch_app_clean_stop_flag()
+            if _should_mark_clean_shutdown():
+                data_service.touch_app_clean_stop_flag()
         except Exception:
             pass
 
@@ -2232,15 +2290,43 @@ def unlock_member_route(member_id):
 
 @app.route("/api/data/members/<int:member_id>/enable", methods=["POST"])
 def enable_member_route(member_id):
-    if not _session_has_internal("user-enable"):
-        return jsonify({"error": "Forbidden. Enable requires profile management permission."}), 403
     try:
         before_member = data_service.get_member(member_id)
         cur = data_service.get_current_user() or {}
+        enabled_by = str(cur.get("username") or cur.get("name") or "--").strip() or "--"
+        enabled_by_role = str(cur.get("role") or "--").strip() or "--"
+        enabled_user = str(
+            (before_member or {}).get("username")
+            or (before_member or {}).get("name")
+            or "--"
+        ).strip() or "--"
+        enabled_user_role = str((before_member or {}).get("role") or "--").strip() or "--"
+        enable_detail = "enabledBy={} (role={}) | enabledUser={} (userID={} role={})".format(
+            enabled_by, enabled_by_role, enabled_user, member_id, enabled_user_role
+        )
+        if not _session_has_internal("user-enable"):
+            _audit_event(
+                action="User enable",
+                outcome="denied",
+                entity_type="member",
+                entity_id=member_id,
+                entity_name=enabled_user,
+                details="Enable denied | {}".format(enable_detail),
+                target_user=enabled_user,
+                extra={
+                    "enabledBy": enabled_by,
+                    "enabledByRole": enabled_by_role,
+                    "enabledUser": enabled_user,
+                    "enabledUserRole": enabled_user_role,
+                    "memberId": member_id,
+                    "reason": "permission_denied",
+                },
+            )
+            return jsonify({"error": "Forbidden. Enable requires profile management permission."}), 403
         sig = {
             "mode": "session",
-            "username": (cur.get("username") or cur.get("name") or "").strip() or "--",
-            "role": (cur.get("role") or "").strip() or "--",
+            "username": enabled_by,
+            "role": enabled_by_role,
         }
         member = data_service.enable_member(member_id)
         _audit_event(
@@ -2249,11 +2335,18 @@ def enable_member_route(member_id):
             entity_type="member",
             entity_id=member_id,
             entity_name=member.get("username") or member.get("name") or "",
-            details="Member enabled",
+            details=enable_detail,
             target_user=member.get("username") or "",
             before=data_service.sanitize_member_for_client(before_member) if before_member else None,
             after=data_service.sanitize_member_for_client(member) or member,
             signature=sig,
+            extra={
+                "enabledBy": enabled_by,
+                "enabledByRole": enabled_by_role,
+                "enabledUser": enabled_user,
+                "enabledUserRole": enabled_user_role,
+                "memberId": member_id,
+            },
         )
         safe = data_service.sanitize_member_for_client(member) or dict(member)
         return jsonify({"success": True, "member": safe}), 200
@@ -2648,12 +2741,13 @@ def login():
                 return jsonify({"success": True, "user": data_service.sanitize_member_for_client(user) or user}), 200
             _audit_event(
                 action="Login",
-                outcome="failed",
+                outcome="denied",
                 entity_type="session",
                 entity_name="password",
-                details="Invalid password (factory user)",
+                details=_login_attempt_identity_detail(None, username, "Wrong password (factory user)"),
                 target_user=username,
-                extra={"attemptedUser": username, "method": "password"},
+                actor_override={"user": username, "role": "--", "name": username},
+                extra={"attemptedUser": username, "method": "password", "username": username, "role": "--"},
             )
             return jsonify({"error": "Invalid username or password"}), 401
 
@@ -2661,11 +2755,34 @@ def login():
         member = data_service.get_member_by_username(username)
         if member:
             status = str(member.get("status") or "active").strip().lower()
+            attempted_actor = _member_login_actor(member, username)
+            attempted_username = attempted_actor["user"]
+            member_id = attempted_actor.get("memberId")
             if status == "locked":
-                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account locked", target_user=username, extra={"attemptedUser": username, "method": "password"})
+                _audit_event(
+                    action="Login",
+                    outcome="denied",
+                    entity_type="session",
+                    entity_id=member_id,
+                    entity_name=attempted_username,
+                    details=_login_attempt_identity_detail(member, username, "Locked account login attempt"),
+                    target_user=attempted_username,
+                    actor_override=attempted_actor,
+                    extra={"attemptedUser": attempted_username, "method": "password", "accountStatus": "locked", "memberId": member_id, "username": attempted_username, "role": attempted_actor.get("role")},
+                )
                 return jsonify({"error": "Account locked. Contact admin."}), 403
             if status == "disabled":
-                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account disabled", target_user=username, extra={"attemptedUser": username, "method": "password"})
+                _audit_event(
+                    action="Login",
+                    outcome="denied",
+                    entity_type="session",
+                    entity_id=member_id,
+                    entity_name=attempted_username,
+                    details=_login_attempt_identity_detail(member, username, "Disabled account login attempt"),
+                    target_user=attempted_username,
+                    actor_override=attempted_actor,
+                    extra={"attemptedUser": attempted_username, "method": "password", "accountStatus": "disabled", "memberId": member_id, "username": attempted_username, "role": attempted_actor.get("role")},
+                )
                 return jsonify({"error": "Account disabled by admin."}), 403
 
         # Try authenticate
@@ -2732,65 +2849,80 @@ def login():
                 fa = 0
             remaining = max(0, 3 - fa)
             # If this attempt caused the account to become locked, show lockout immediately
+            attempted_actor = _member_login_actor(updated, username)
+            attempted_username = attempted_actor["user"]
+            member_id = attempted_actor.get("memberId")
             if status == "locked":
-                _audit_event(
-                    action="Login",
-                    outcome="failed",
-                    entity_type="session",
-                    entity_name="password",
-                    details="Invalid password (attempt {} of 3); account locked".format(fa),
-                    target_user=username,
-                    entity_id=updated.get("id"),
-                    extra={
-                        "attemptedUser": username,
-                        "failedAttempts": fa,
-                        "remainingAttempts": 0,
-                        "method": "password",
-                        "memberId": updated.get("id"),
-                    },
-                )
                 _audit_event(
                     action="Login",
                     outcome="denied",
                     entity_type="session",
-                    entity_name="password",
-                    details="Account locked after failed attempts",
-                    target_user=username,
-                    entity_id=updated.get("id"),
-                    extra={"attemptedUser": username, "failedAttempts": fa, "method": "password"},
+                    entity_id=member_id,
+                    entity_name=attempted_username,
+                    details=_login_attempt_identity_detail(updated, username, "Wrong password (attempt {} of 3); account locked".format(fa)),
+                    target_user=attempted_username,
+                    actor_override=attempted_actor,
+                    extra={
+                        "attemptedUser": attempted_username,
+                        "failedAttempts": fa,
+                        "remainingAttempts": 0,
+                        "method": "password",
+                        "memberId": member_id,
+                        "username": attempted_username,
+                        "role": attempted_actor.get("role"),
+                    },
+                )
+                _audit_event(
+                    action="User locked",
+                    outcome="denied",
+                    entity_type="member",
+                    entity_id=member_id,
+                    entity_name=attempted_username,
+                    details=_login_attempt_identity_detail(updated, username, "Account locked after failed password attempts"),
+                    target_user=attempted_username,
+                    actor_override=attempted_actor,
+                    extra={"attemptedUser": attempted_username, "failedAttempts": fa, "method": "password", "memberId": member_id},
                 )
                 return jsonify({
                     "error": "Account locked. Contact admin.",
                     "remainingAttempts": 0
                 }), 403
+            attempted_actor = _member_login_actor(updated, username)
+            attempted_username = attempted_actor["user"]
+            member_id = attempted_actor.get("memberId")
             _audit_event(
                 action="Login",
-                outcome="failed",
+                outcome="denied",
                 entity_type="session",
-                entity_name="password",
-                details="Invalid password (attempt {} of 3)".format(fa),
-                target_user=username,
-                entity_id=updated.get("id"),
+                entity_id=member_id,
+                entity_name=attempted_username,
+                details=_login_attempt_identity_detail(updated, username, "Wrong password (attempt {} of 3)".format(fa)),
+                target_user=attempted_username,
+                actor_override=attempted_actor,
                 extra={
-                    "attemptedUser": username,
+                    "attemptedUser": attempted_username,
                     "failedAttempts": fa,
                     "remainingAttempts": remaining,
                     "method": "password",
-                    "memberId": updated.get("id"),
+                    "memberId": member_id,
+                    "username": attempted_username,
+                    "role": attempted_actor.get("role"),
                 },
             )
             return jsonify({
                 "error": "Invalid username or password.",
                 "remainingAttempts": remaining
             }), 401
+        attempted = (username or "--").strip() or "--"
         _audit_event(
             action="Login",
-            outcome="failed",
+            outcome="denied",
             entity_type="session",
-            entity_name="password",
-            details="Unknown user",
-            target_user=username or "--",
-            extra={"attemptedUser": username or "--", "method": "password"},
+            entity_name=attempted,
+            details=_login_attempt_identity_detail(None, attempted, "Wrong password (unknown user)"),
+            target_user=attempted,
+            actor_override={"user": attempted, "role": "--", "name": attempted},
+            extra={"attemptedUser": attempted, "method": "password", "unknownUser": True, "username": attempted, "role": "--"},
         )
         return jsonify({"error": "Invalid username or password"}), 401
     except Exception as e:

@@ -1396,7 +1396,7 @@ def _format_report_text(report_data: Dict[str, Any], width: int = A4_TEXT_WIDTH)
                         op.get("action") or "?",
                         op.get("name") or op.get("username") or "?",
                         op.get("role") or "--",
-                        op.get("at") or "--",
+                        _format_ts_readable(op.get("at")),
                     )
                 )
         for label, value in drum_results:
@@ -1432,7 +1432,7 @@ def _format_report_text(report_data: Dict[str, Any], width: int = A4_TEXT_WIDTH)
                         op.get("action") or "?",
                         op.get("name") or op.get("username") or "?",
                         op.get("role") or "--",
-                        op.get("at") or "--",
+                        _format_ts_readable(op.get("at")),
                     )
                 )
     if thermal:

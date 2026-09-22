@@ -103,6 +103,9 @@ def add_event_listener(fn: Callable[[Dict[str, Any]], None]) -> None:
         _event_listeners.append(fn)
 
 
+_pending_test_sync = None
+_test_sync_lock = threading.Lock()
+
 _recent_events: List[Dict[str, Any]] = []
 _recent_events_lock = threading.Lock()
 _RECENT_EVENTS_MAX = 50
@@ -232,7 +235,17 @@ def _handle_rx_inner(inner: str) -> None:
         _emit_event({"type": "CLEAN-DONE", "raw": inner})
     elif "ENT-TSML-VL" in upper:
         _emit_event({"type": "SAMPLE-CAL-READY", "raw": inner})
+    elif "TEST-SYNC" in upper:
+        sync = proto.parse_test_sync(inner)
+        if sync:
+            global _pending_test_sync
+            with _test_sync_lock:
+                _pending_test_sync = sync
+            _emit_event({"type": "TEST-SYNC", "sync": sync, "raw": inner})
     else:
+        step_no = proto.extract_esp_step_current(inner)
+        if step_no is not None:
+            _emit_event({"type": "ESP-STEP", "stepCurrent": step_no, "raw": inner})
         # Sampling progress (forwarded bath/sampler lines) — phase transitions only.
         if (
             "SMP-START" in upper
@@ -270,6 +283,7 @@ def _is_async_completion(inner: str) -> bool:
         or "LF-CL-HOME" in upper
         or "LF-CU-HOME" in upper
         or "END-TEST" in upper
+        or "TEST-SYNC" in upper
         or "ERR,RCP" in upper
     )
 
@@ -1028,6 +1042,9 @@ def resume_test() -> Dict[str, Any]:
 
 def pf_resume_test() -> Dict[str, Any]:
     """Send #PF-RESUME-TEST* to continue after power restore (bath NVS)."""
+    global _pending_test_sync
+    with _test_sync_lock:
+        _pending_test_sync = None
     res = _tx(
         proto.build_pf_resume_test(),
         timeout=8.0,
@@ -1037,6 +1054,16 @@ def pf_resume_test() -> Dict[str, Any]:
         with _sim_lock:
             _sim["paused"] = False
             _sim["running"] = True
+        deadline = time.time() + 5.0
+        sync = None
+        while time.time() < deadline:
+            with _test_sync_lock:
+                sync = _pending_test_sync
+            if sync:
+                break
+            time.sleep(0.05)
+        if sync:
+            res["testSync"] = dict(sync)
     return res
 
 

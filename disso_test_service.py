@@ -35,9 +35,11 @@ _save_report_fn: Optional[Callable] = None
 _watchdog_started = False
 _last_persist_mono = 0.0
 _PERSIST_MIN_INTERVAL_SEC = 5.0
-_END_TEST_TIMEOUT_SEC = 45.0
+_END_TEST_TIMEOUT_SEC = 12.0
 _end_test_wait_mono: Optional[float] = None
 _last_elapsed_mono: Optional[float] = None
+_step_zero_mono: Optional[float] = None
+_ESP_STEP_ADVANCE_FALLBACK_SEC = 12.0
 _INTERVAL_LOG_MAX = 500
 _interval_print_busy = False
 _last_interval_print_fail_audit_mono = 0.0
@@ -125,6 +127,7 @@ def _operator_entry(user: Dict[str, Any], action: str) -> Dict[str, Any]:
 
 
 def get_state(public: bool = False) -> Dict[str, Any]:
+    _hydrate_active_from_checkpoint_if_needed()
     with _lock:
         st = copy.deepcopy(_run)
     # Never expose monotonic deadline to clients / public JSON.
@@ -388,9 +391,91 @@ def _maybe_interval_print() -> None:
         _emit_interval_print_async(snap)
 
 
+
+
+def _recipe_steps_locked() -> List[Dict[str, Any]]:
+    recipe = _run.get("recipe") or {}
+    steps = _run.get("remainingStepsPayload")
+    if isinstance(steps, list) and steps:
+        return steps
+    return proto.normalize_steps(recipe) if recipe else []
+
+
+def _apply_esp_step_current(step_current: int) -> None:
+    """Advance Pi step timer when bath ESP reports ST-N (PROBE-DOWN / SMP-START)."""
+    global _end_test_wait_mono, _step_zero_mono
+    if not step_current:
+        return
+    new_idx = max(0, int(step_current) - 1)
+    with _lock:
+        if not _run.get("active"):
+            return
+        cur_idx = int(_run.get("stepIndex") or 0)
+        if new_idx < cur_idx:
+            return
+        steps = _recipe_steps_locked()
+        if new_idx >= len(steps):
+            return
+        if new_idx == cur_idx and int(_run.get("remainingSecInStep") or 0) > 0:
+            return
+        _run["stepIndex"] = new_idx
+        dur = max(0, int(steps[new_idx].get("durationSeconds") or 0))
+        _run["setSecInStep"] = dur
+        _set_step_deadline_locked(dur)
+        _end_test_wait_mono = None
+        _step_zero_mono = None
+        _run["lastHeartbeatRtc"] = _now_iso()
+    _persist(force=True)
+
+
+def _apply_test_sync(sync: Dict[str, Any]) -> None:
+    """Apply authoritative bath timing from #TEST-SYNC after PF-RESUME."""
+    global _end_test_wait_mono, _last_elapsed_mono, _step_zero_mono
+    if not isinstance(sync, dict) or not sync:
+        return
+    with _lock:
+        if not _run.get("active"):
+            return
+        steps = _recipe_steps_locked()
+        if sync.get("stepIndex") is not None:
+            idx = max(0, min(int(sync["stepIndex"]), max(0, len(steps) - 1)))
+            if idx >= int(_run.get("stepIndex") or 0):
+                _run["stepIndex"] = idx
+                if steps and idx < len(steps):
+                    _run["setSecInStep"] = max(0, int(steps[idx].get("durationSeconds") or 0))
+        if sync.get("remainingSecInStep") is not None:
+            rem = max(0, int(sync["remainingSecInStep"]))
+            _set_step_deadline_locked(rem)
+            _step_zero_mono = None
+        if sync.get("elapsedSec") is not None:
+            _run["elapsedSec"] = max(0, int(sync["elapsedSec"]))
+        _run["runStatus"] = "RUNNING"
+        _run["paused"] = False
+        _end_test_wait_mono = None
+        _last_elapsed_mono = time.monotonic()
+        _run["lastHeartbeatRtc"] = _now_iso()
+    _persist(force=True)
+
+
+def _merge_test_sync_checkpoint(cp: Dict[str, Any], sync: Dict[str, Any]) -> Dict[str, Any]:
+    out = copy.deepcopy(cp)
+    if not isinstance(sync, dict):
+        return out
+    steps = proto.normalize_steps(out.get("recipe") or {})
+    if sync.get("stepIndex") is not None:
+        idx = max(0, min(int(sync["stepIndex"]), max(0, len(steps) - 1)))
+        out["stepIndex"] = idx
+        if steps and idx < len(steps):
+            out["setSecInStep"] = max(0, int(steps[idx].get("durationSeconds") or 0))
+    if sync.get("remainingSecInStep") is not None:
+        out["remainingSecInStep"] = max(0, int(sync["remainingSecInStep"]))
+    if sync.get("elapsedSec") is not None:
+        out["elapsedSec"] = max(0, int(sync["elapsedSec"]))
+    return out
+
 def _heartbeat_loop():
     """Wall-clock step countdown. Persist is debounced so USB I/O never stretches ticks."""
-    global _end_test_wait_mono, _last_elapsed_mono
+    global _end_test_wait_mono, _last_elapsed_mono, _step_zero_mono
     while True:
         time.sleep(0.2)
         try:
@@ -418,20 +503,23 @@ def _heartbeat_loop():
                         if rem != rem_prev:
                             _run["remainingSecInStep"] = rem
                         if rem <= 0:
-                            steps = _run.get("remainingStepsPayload")
-                            if not isinstance(steps, list) or not steps:
-                                steps = proto.normalize_steps(_run.get("recipe") or {})
+                            _run["remainingSecInStep"] = 0
+                            steps = _recipe_steps_locked()
                             idx = int(_run.get("stepIndex") or 0)
                             if idx + 1 < len(steps):
-                                nxt = steps[idx + 1]
-                                dur = max(0, int(nxt.get("durationSeconds") or 0))
-                                _run["stepIndex"] = idx + 1
-                                _run["setSecInStep"] = dur
-                                _set_step_deadline_locked(dur)
-                                _end_test_wait_mono = None
-                                force_persist = True
+                                if _step_zero_mono is None:
+                                    _step_zero_mono = now_m
+                                    force_persist = True
+                                elif (now_m - _step_zero_mono) >= _ESP_STEP_ADVANCE_FALLBACK_SEC:
+                                    nxt = steps[idx + 1]
+                                    dur = max(0, int(nxt.get("durationSeconds") or 0))
+                                    _run["stepIndex"] = idx + 1
+                                    _run["setSecInStep"] = dur
+                                    _set_step_deadline_locked(dur)
+                                    _end_test_wait_mono = None
+                                    _step_zero_mono = None
+                                    force_persist = True
                             else:
-                                _run["remainingSecInStep"] = 0
                                 _run.pop("stepDeadlineMono", None)
                                 if _end_test_wait_mono is None:
                                     _end_test_wait_mono = now_m
@@ -471,14 +559,18 @@ def _on_status(status: Dict[str, Any]):
                 rem_base = int(_run.get("resumeFromStepIndex") or 0)
                 cur = int(status["stepCurrent"]) - 1
                 new_idx = rem_base + max(0, cur)
-                if new_idx != _run.get("stepIndex"):
+                cur_idx = int(_run.get("stepIndex") or 0)
+                if new_idx > cur_idx:
                     changed = True
-                _run["stepIndex"] = new_idx
+                    _run["stepIndex"] = new_idx
             if status.get("remainingTime"):
                 rem = proto.hms_to_seconds(status.get("remainingTime"))
-                if rem is not None and rem != _run.get("remainingSecInStep"):
-                    changed = True
-                    _set_step_deadline_locked(rem)
+                if rem is not None:
+                    cur_rem = int(_run.get("remainingSecInStep") or 0)
+                    if cur_rem <= 0 or rem <= cur_rem:
+                        if rem != cur_rem:
+                            changed = True
+                            _set_step_deadline_locked(rem)
             if status.get("setTime"):
                 set_s = proto.hms_to_seconds(status.get("setTime"))
                 if set_s is not None:
@@ -506,8 +598,13 @@ def _on_status(status: Dict[str, Any]):
 def _on_cmd_event(evt: Dict[str, Any]):
     if not evt:
         return
-    if evt.get("type") == "END-TEST":
+    et = evt.get("type")
+    if et == "END-TEST":
         _complete(aborted=False)
+    elif et == "TEST-SYNC":
+        _apply_test_sync(evt.get("sync") or {})
+    elif et == "ESP-STEP":
+        _apply_esp_step_current(evt.get("stepCurrent"))
 
 
 def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -924,8 +1021,12 @@ def try_startup_power_recovery() -> Dict[str, Any]:
         }
 
     pf_res = cmd_hw.pf_resume_test()
+    sync = pf_res.get("testSync") if isinstance(pf_res, dict) else None
+    if isinstance(sync, dict) and sync:
+        adjusted = _merge_test_sync_checkpoint(adjusted, sync)
     with _lock:
-        global _end_test_wait_mono, _last_elapsed_mono
+        global _end_test_wait_mono, _last_elapsed_mono, _step_zero_mono
+        _step_zero_mono = None
         _run.clear()
         _run.update(adjusted)
         _run["active"] = True

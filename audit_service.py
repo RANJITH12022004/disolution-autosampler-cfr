@@ -47,9 +47,11 @@ AUDIT_ACTION_GROUP_FILTERS: Dict[str, List[str]] = {
     ],
     "Test Run": [
         "(COALESCE(action, '') IN ('Test started', 'Test paused', 'Test resumed', 'Test finished', 'Test aborted', "
+        "'Preheat started', 'Preheat complete', 'Preheat stopped', 'Recipe loaded', "
         "'Power auto-resume', 'Power resume pending', 'Test continued', "
-        "'Test finished during power outage', 'ESP recipe uploaded', 'ESP START-TEST', 'ESP END-TEST', "
-        "'ESP PF-RESUME-TEST', 'Report aborted (power loss)'))",
+        "'Test finished during power outage', 'Report aborted (power loss)', "
+        "'Started dissolution test', 'Completed dissolution test', 'Aborted dissolution test', "
+        "'ESP recipe uploaded', 'Loaded recipe', 'ESP START-TEST', 'ESP END-TEST', 'ESP PF-RESUME-TEST'))",
     ],
     "Cleaning Cycle": [
         "(COALESCE(action, '') IN ('Cleaning cycle started', 'Cleaning cycle stopped'))",

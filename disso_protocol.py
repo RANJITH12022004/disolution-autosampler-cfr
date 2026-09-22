@@ -189,7 +189,9 @@ def build_recipe_frames(
     """
     Build UART-1 recipe upload frames for remaining steps (renumbered 1..N).
 
-    Order: SET-TEMP → TS → [MDV] → RPM → DUR → SML → FL → AUTO-DROP
+    Order: AUTO-DROP → SET-TEMP → TS → [MDV] → RPM → DUR → SML → FL
+    AUTO-DROP must precede recipe parameters — bath locks on FL and emits
+    #RECIPE,ACK*; late AUTO-DROP gets #ERR,LOCK*.
     Final #RECIPE,ACK* is waited separately after these frames.
     """
     steps = remaining_steps(recipe, from_step_index)
@@ -200,7 +202,8 @@ def build_recipe_frames(
         steps[0]["durationSeconds"] = max(1, int(remaining_sec_in_step))
 
     n = len(steps)
-    frames = [wrap("SET-TEMP-{}".format(_fmt_set_temp(recipe)))]
+    frames = [build_auto_drop(recipe_auto_drop_on(recipe))]
+    frames.append(wrap("SET-TEMP-{}".format(_fmt_set_temp(recipe))))
     frames.append(wrap("TS-{:02d}".format(n)))
 
     mdv_frame = build_mdv(recipe.get("mediaVolume"))
@@ -240,7 +243,6 @@ def build_recipe_frames(
     fl_parts = ["{}-{}".format(st["index"], flush_s) for st in steps]
     frames.append(wrap("FL," + ",".join(fl_parts)))
 
-    frames.append(build_auto_drop(recipe_auto_drop_on(recipe)))
     return frames
 
 
@@ -427,8 +429,8 @@ def build_pre_heat() -> str:
 
 
 def build_stop_heat() -> str:
-    """Stop bath heater / circulation heat (#STOP-HEAT*)."""
-    return wrap("STOP-HEAT")
+    """Stop bath preheat / heater (#STOP-PRE-HEAT*)."""
+    return wrap("STOP-PRE-HEAT")
 
 
 def build_start_pld(rpm: int) -> str:

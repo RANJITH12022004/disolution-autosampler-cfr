@@ -426,13 +426,9 @@ function flushAuditEventQueue() {
 }
 
 function auditExitActiveScreenBeforeSessionEnd() {
-    var active = _auditActivePage;
-    if (!active || _auditSkipPages[active] || !window.currentUser) {
-        _auditActivePage = null;
-        return Promise.resolve();
-    }
+    // Do not write Entered/Exited screen rows — only meaningful actions are audited.
     _auditActivePage = null;
-    return logAuditEvent('Exited screen', auditPageLabel(active), { eventType: 'navigation' });
+    return Promise.resolve();
 }
 
 function auditTestRunStarted(rec) {
@@ -564,22 +560,13 @@ function logReportApprovedAudit(reportId, passFail, remarks) {
 }
 
 function auditNavPageChange(newPage) {
+    // Track active page for session cleanup only — no Entered/Exited screen audit rows.
     if (_auditSkipPages[newPage]) {
         _auditActivePage = null;
         return;
     }
     if (newPage === _auditActivePage) return;
-    var prev = _auditActivePage;
     _auditActivePage = newPage;
-    if (!window.currentUser) return;
-    if (prev && !_auditSkipPages[prev]) {
-        logAuditEvent('Exited screen', auditPageLabel(prev), { eventType: 'navigation' });
-    }
-    if (newPage === 'validation-run') {
-        logAuditEvent('Entered USP validation', 'USP friability validation screen', { eventType: 'navigation' });
-    } else if (newPage && !_auditSkipPages[newPage]) {
-        logAuditEvent('Entered screen', auditPageLabel(newPage), { eventType: 'navigation' });
-    }
 }
 
 var editingMemberId = null;
@@ -667,7 +654,7 @@ function friendlyHardwareError(errOrMsg, fallback) {
     // Already friendly product copy — pass through if no protocol markers.
     if (u.indexOf('#') < 0 && u.indexOf('ACK') < 0 && u.indexOf('SET-TEMP') < 0 &&
         u.indexOf('PRE-HEAT') < 0 && u.indexOf('PRE-DONE') < 0 && u.indexOf('START-PLD') < 0 &&
-        u.indexOf('STOP-HEAT') < 0 && u.indexOf('START-TEST') < 0 && u.indexOf('ERR,') < 0 &&
+        u.indexOf('STOP-PRE-HEAT') < 0 && u.indexOf('STOP-HEAT') < 0 && u.indexOf('START-TEST') < 0 && u.indexOf('ERR,') < 0 &&
         u.indexOf('LF-CU') < 0 && !/\bINIT\b/.test(u) && !/TIMEOUT/.test(u)) {
         return raw;
     }
@@ -677,7 +664,7 @@ function friendlyHardwareError(errOrMsg, fallback) {
     if (/PRE-DONE/.test(u) && /TIMEOUT/.test(u)) {
         return 'Bath has not reached set temperature yet. Heating is still running.';
     }
-    if (/PRE-HEAT|PRE-DONE|SET-TEMP|STOP-HEAT/.test(u)) {
+    if (/PRE-HEAT|PRE-DONE|SET-TEMP|STOP-PRE-HEAT|STOP-HEAT/.test(u)) {
         return 'Heating command failed. Try again.';
     }
     if (/START-PLD|STOP-PLD|START-RPM|STOP-RPM/.test(u)) {
@@ -1940,6 +1927,9 @@ function leaveReportPreviewIfAllowed() {
         );
         return;
     }
+    // Invalidate in-flight openReportPreview callbacks so a late pending fetch cannot re-lock.
+    window._reportPreviewOpenGen = (window._reportPreviewOpenGen || 0) + 1;
+    clearReportApprovalGate();
     goToPage('reports');
 }
 
@@ -1951,10 +1941,20 @@ function openPendingReportPreview(reportId) {
 }
 
 function finishTestRunReportSaved(reportId) {
+    // Latch disso_client so END-TEST / state poll cannot open the same pending preview again.
+    if (typeof window.dissoMarkRunEndedApplied === 'function') {
+        try { window.dissoMarkRunEndedApplied(); } catch (eMark) { /* ignore */ }
+    }
     if (typeof resetQuickTestFormAfterRunIfPending === 'function') resetQuickTestFormAfterRunIfPending();
     // Prevent test-run nav guard from re-prompting Abort while opening preview.
     _suppressTestRunNavGuardOnce = true;
     if (reportId) {
+        // Abort UI and server-end path can both call this; open once per ended report id.
+        if (window._lastOpenedEndedReportId != null &&
+            String(window._lastOpenedEndedReportId) === String(reportId)) {
+            return;
+        }
+        window._lastOpenedEndedReportId = reportId;
         openPendingReportPreview(reportId);
     } else {
         goToPage('reports');
@@ -3108,7 +3108,6 @@ function goToPage(pageName) {
         }, 40);
     }
     if (pageName === 'disable-recipes') {
-        logAuditEvent('Opened disabled recipes', 'Disabled recipes list opened', { eventType: 'navigation' });
         setTimeout(function () {
             if (typeof loadDisableRecipes === 'function') loadDisableRecipes();
         }, 50);
@@ -3870,7 +3869,6 @@ function enrollMemberBiometric() {
 
 function startRecipeTest() {
     recipeListMode = 'load';
-    logAuditEvent('Opened Load Recipe', 'Load Recipe list opened', { eventType: 'navigation' });
     goToPage('manage-recipes');
 }
 
@@ -4042,7 +4040,6 @@ function startQuickTest() {
     var list = document.getElementById('quick-create-recipe-steps-list');
     if (list) list.innerHTML = '';
     window._quickTestFormPendingReset = true;
-    logAuditEvent('Opened Quick Test', 'Quick Test screen opened', { eventType: 'navigation' });
     goToPage('quick-test');
 }
 
@@ -4185,7 +4182,6 @@ function resetQuickTestFormAfterRunIfPending() {
 
 function manageRecipes() {
     recipeListMode = 'manage';
-    logAuditEvent('Opened Manage Recipe', 'Manage Recipe list opened', { eventType: 'navigation' });
     goToPage('manage-recipes');
 }
 
@@ -4266,7 +4262,6 @@ function startRecipeCreation() {
     window._createRecipeStepPrefill = null;
     var list = document.getElementById('create-recipe-steps-list');
     if (list) list.innerHTML = '';
-    logAuditEvent('Opened Create Recipe', 'Create Recipe screen opened', { eventType: 'navigation' });
     goToPage('create-recipe-step1');
 }
 
@@ -6539,18 +6534,16 @@ function _populateAuditFilterDropdowns(userEl, actionEl, fullList) {
     });
     var coreActions = [
         'Login', 'Logout', 'Logout (inactivity timeout)', 'Power interruption logout', 'Power interruption', 'User logged in',
-        'Entered screen', 'Exited screen',
-        'Opened Quick Test', 'Opened Load Recipe', 'Opened Manage Recipe', 'Loaded recipe',
-        'Opened disabled recipes',
-        'Test started', 'Quick test started', 'Test paused', 'Test resumed', 'Test finished', 'Test aborted', 'Test auto-aborted',
+        'Preheat started', 'Preheat complete', 'Preheat stopped',
+        'Recipe loaded', 'Test started', 'Quick test started', 'Test paused', 'Test resumed', 'Test finished', 'Test aborted', 'Test auto-aborted',
         'Test performed', 'Quick test performed',
-        'Entered USP validation',
         'Validation started', 'Validation finished', 'Validation aborted', 'Validation performed',
         'Temperature Validation', 'RPM Validation', 'Physical Parameters', 'Sample Volume Validation',
         'Calibration', 'Cleaning Cycle', 'Wakeup Schedule', 'Test Settings',
         'Temperature calibration started', 'Temperature calibration completed',
         'Cleaning cycle started', 'Cleaning cycle stopped', 'Wakeup schedule saved',
         'System settings saved', 'Test settings saved',
+        'Report opened', 'Report printed', 'Report exported',
         'Report saved', 'Report generated', 'Report approved', 'Report deleted',
         'Report aborted', 'Report aborted (power loss)', 'Report PDF generated',
         'Recipe created', 'Recipe edited', 'Recipe approved', 'Approval verification',
@@ -7640,8 +7633,19 @@ function openReportPreview(reportId, options) {
         denyPermission('view reports');
         return;
     }
+    // Drop stale async opens (abort can start two fetches; a late pending reply re-locks after approve).
+    window._reportPreviewOpenGen = (window._reportPreviewOpenGen || 0) + 1;
+    var openGen = window._reportPreviewOpenGen;
     apiRequest(API_BASE + '/api/reports/' + reportId + '/preview').then(function (data) {
+        if (openGen !== window._reportPreviewOpenGen) return;
         if (data.preview) {
+            // Never downgrade an already-approved in-memory preview back to pending.
+            var prev = window._lastReportPreview;
+            if (prev && String(prev.id) === String(reportId) &&
+                typeof isReportApproved === 'function' && isReportApproved(prev) &&
+                typeof isReportPendingApproval === 'function' && isReportPendingApproval(data.preview)) {
+                return;
+            }
             currentReportId = reportId;
             currentReportData = null;
             populateReportPreview(data.preview);
@@ -7657,6 +7661,7 @@ function openReportPreview(reportId, options) {
             resetReportPreviewScroll();
             startReportApprovalPollIfLocked();
             setTimeout(function () {
+                if (openGen !== window._reportPreviewOpenGen) return;
                 resetReportPreviewScroll();
                 if (isReportPreviewLockedForCurrentUser(data.preview)) {
                     scrollReportPendingBannerIntoView();
@@ -7670,6 +7675,7 @@ function openReportPreview(reportId, options) {
             showAppModal('Report preview is not available.', 'Reports');
         }
     }).catch(function () {
+        if (openGen !== window._reportPreviewOpenGen) return;
         showAppModal('Could not open report preview. Check your connection and try again from Reports.', 'Reports');
     });
 }
@@ -7838,6 +7844,8 @@ function approveReportWithVerifier(reportId, passFail, remarks, verifyMethod) {
 }
 
 function applyApprovedReportResponse(data, reportId) {
+    // Invalidate any in-flight openReportPreview that could still return pending.
+    window._reportPreviewOpenGen = (window._reportPreviewOpenGen || 0) + 1;
     if (data && (data.preview || data.report) && typeof populateReportPreview === 'function') {
         var preview = data.preview || data.report;
         currentReportId = reportId;
@@ -8312,9 +8320,7 @@ function _finalizeRecipeLoad(recipe, ctx) {
     if (!runRecipe.recipeType) runRecipe.recipeType = 'dissolution';
     pendingRecipeLoadContext = null;
     pendingRecipeToLoad = null;
-    logAuditEvent('Loaded recipe', (runRecipe.productName || 'Recipe') + ', AR ' + (runRecipe.arNumber || '--') + ', batch ' + (runRecipe.batchNumber || '--'), {
-        eventType: 'lifecycle'
-    });
+    // Audit fires as "Recipe loaded" after hardware accepts the recipe (see _dtUploadRecipeToEsp).
     window.activeTestRecipe = runRecipe;
     startTestRun(runRecipe);
 }
@@ -11962,7 +11968,7 @@ function setHeaterControlPower(on) {
             _heaterCtrlSetUiOn(true);
             _heaterCtrlSetStatus('Heater ON — heating to ' + t.toFixed(1) + ' °C.', 'ok');
             if (typeof logAuditEvent === 'function') {
-                logAuditEvent('Heater on', 'Heater turned on at ' + t.toFixed(1) + ' C', {
+                logAuditEvent('Heater started', 'Heater turned on at ' + t.toFixed(1) + ' °C', {
                     eventType: 'lifecycle', entityType: 'settings'
                 });
             }
@@ -11988,7 +11994,7 @@ function setHeaterControlPower(on) {
         _heaterCtrlSetUiOn(false);
         _heaterCtrlSetStatus('Heater OFF.', 'ok');
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Heater off', 'Heater turned off', {
+            logAuditEvent('Heater stopped', 'Heater turned off', {
                 eventType: 'lifecycle', entityType: 'settings'
             });
         }
@@ -12578,6 +12584,18 @@ function startTestRun(recipe) {
         showAppModal('Only Dissolution recipes can be loaded for testing.', 'Load Recipe');
         return;
     }
+    // Do not init/upload while the operator is still hard-locked on a pending report
+    // (goToPage would bounce to report-preview but ESP upload used to continue anyway).
+    if (typeof isReportPreviewLockedForCurrentUser === 'function' &&
+        isReportPreviewLockedForCurrentUser(window._lastReportPreview)) {
+        showAppModal(
+            'This report is awaiting approval. You must stay on the report screen until a reviewer approves it.',
+            'Report'
+        );
+        var rid = currentReportId || (window._reportApprovalGate && window._reportApprovalGate.reportId);
+        if (rid && typeof openReportPreview === 'function') openReportPreview(rid);
+        return;
+    }
     // Deep-clone so Load Recipe / Quick Test always carry media, AR, batch, steps, etc.
     var runRecipe;
     try {
@@ -12602,7 +12620,7 @@ function startTestRun(recipe) {
             _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
         }
     }, 50);
-    // On Load: send SET-TEMP → TS → RPM → DUR → SML → FL → AUTO-DROP (Start only sends START-TEST).
+    // On Load: AUTO-DROP first, then SET-TEMP → TS → RPM → DUR → SML → FL (Start only sends START-TEST).
     _dtUploadRecipeToEsp(runRecipe);
 }
 
@@ -12619,8 +12637,11 @@ function _dtUploadRecipeToEsp(recipe) {
             _dtResetPreheatUi();
         }
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('ESP recipe uploaded', (recipe.productName || recipe.name || 'Recipe') + ' loaded to ESP', {
-                eventType: 'lifecycle'
+            var rname = recipe.productName || recipe.name || 'Recipe';
+            logAuditEvent('Recipe loaded', rname, {
+                eventType: 'lifecycle',
+                entityType: 'recipe',
+                entityName: rname
             });
         }
         _dtSetStatus('Press Preheat when ready.', 'ready');
@@ -12913,7 +12934,13 @@ function dissolutionPreheatStart() {
             window.dissoBeep(2);
         }
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Preheat complete', 'Preheat reached set temperature', { eventType: 'lifecycle' });
+            var pname = (_dissolutionTest && _dissolutionTest.recipe &&
+                (_dissolutionTest.recipe.productName || _dissolutionTest.recipe.name)) || 'Recipe';
+            logAuditEvent('Preheat complete', pname + ' | set temperature reached', {
+                eventType: 'lifecycle',
+                entityType: 'test',
+                entityName: pname
+            });
         }
     }
     window.applyPreheatDoneFromEsp = onPreheatDone;
@@ -12931,7 +12958,13 @@ function dissolutionPreheatStart() {
         _dtSyncEquipVisuals();
         _dtSetStatus('Preheating… waiting for set temperature', 'ready');
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Preheat started', 'Heater accepted preheat command', { eventType: 'lifecycle' });
+            var pname = (live.recipe && (live.recipe.productName || live.recipe.name)) || 'Recipe';
+            var setT = live.recipe && live.recipe.temperature != null ? String(live.recipe.temperature) : '';
+            logAuditEvent(
+                'Preheat started',
+                pname + (setT ? (' | set temperature ' + setT + ' °C') : ''),
+                { eventType: 'lifecycle', entityType: 'test', entityName: pname }
+            );
         }
         // Soft advisory only — do not fail or turn heater off if PRE-DONE is slow.
         if (live.preheatTimerId != null) clearTimeout(live.preheatTimerId);
@@ -12980,7 +13013,12 @@ function dissolutionPreheatStop() {
     if (!stopFn) return;
     stopFn().then(function () {
         if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Preheat stopped', 'Operator cancelled preheat (#STOP-HEAT*)', { eventType: 'lifecycle' });
+            var pname = (dt.recipe && (dt.recipe.productName || dt.recipe.name)) || 'Recipe';
+            logAuditEvent('Preheat stopped', pname, {
+                eventType: 'lifecycle',
+                entityType: 'test',
+                entityName: pname
+            });
         }
     }).catch(function (err) {
         showAppModal(friendlyHardwareError(err, 'Could not stop heater. Check connection.'), 'Preheat');
@@ -13025,6 +13063,7 @@ function initDissolutionTestRun(recipe) {
     _dtStopPreheatTimer();
     _dtStopTimer();
     _dtClearShaftTimers();
+    window._lastOpenedEndedReportId = null;
     recipe = recipe || {};
     _dissolutionTest = {
         recipe: recipe,
@@ -13588,7 +13627,7 @@ function dissolutionTestStart() {
         _dtSetText('dt-current-step', (dt.stepIndex + 1) + ' / ' + dt.steps.length);
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-        logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' started', { eventType: 'lifecycle' });
+        // Server also writes "Test started" with recipe name — avoid duplicate client row.
         try { window._dissoServerRunActive = true; } catch (eS) { /* ignore */ }
         if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
         if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
@@ -13608,7 +13647,7 @@ function dissolutionTestStart() {
         _dtSetText('dt-hero-timer', _dtFormatHms(dt.remainingSec || 0));
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-        logAuditEvent('Resumed dissolution test', (dt.recipe.productName || 'Recipe') + ' resumed', { eventType: 'lifecycle' });
+        logAuditEvent('Test resumed', (dt.recipe.productName || 'Recipe') + ' resumed', { eventType: 'lifecycle' });
         try { window._dissoServerRunActive = true; } catch (eR) { /* ignore */ }
         if (typeof window.dissoStartStatePolling === 'function') window.dissoStartStatePolling();
         if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
@@ -13698,7 +13737,7 @@ function dissolutionTestStart() {
         if (dt.remainingSec <= 0) _dtApplyStep(dt.stepIndex, true);
         _dtSetControlsRunning();
         _dtSetStatus('Test running… Step ' + (dt.stepIndex + 1) + '/' + dt.steps.length, 'running');
-        logAuditEvent('Started dissolution test', (dt.recipe.productName || 'Recipe') + ' step ' + (dt.stepIndex + 1), { eventType: 'lifecycle' });
+        logAuditEvent('Test started', (dt.recipe.productName || 'Recipe'), { eventType: 'lifecycle' });
         _dtStartTicker();
     };
     if (typeof window.dissoLift === 'function' && _shaftMotion !== 'home') {
@@ -13854,7 +13893,7 @@ function _dtOnStepComplete() {
     if (pctEl) pctEl.textContent = '100%';
     if (fillEl) fillEl.style.width = '100%';
     _dtSetStatus('Test completed', 'done');
-    logAuditEvent('Completed dissolution test', (dt.recipe.productName || 'Recipe') + ' finished', { eventType: 'lifecycle' });
+    logAuditEvent('Test finished', (dt.recipe.productName || 'Recipe') + ' finished', { eventType: 'lifecycle' });
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
     _dtSaveCompletionReport({ aborted: false });
 }
@@ -14002,7 +14041,7 @@ function _dtPerformAbort(opts) {
     _dtApplyStep(live.stepIndex, true);
     _dtSetControlsIdle();
     _dtSetStatus('Test aborted', 'aborted');
-    logAuditEvent('Aborted dissolution test', (live.recipe.productName || 'Recipe') + ' aborted', { eventType: 'lifecycle' });
+    logAuditEvent('Test aborted', (live.recipe.productName || 'Recipe') + ' aborted', { eventType: 'lifecycle' });
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
 
     function _openAbortPreview(rid) {

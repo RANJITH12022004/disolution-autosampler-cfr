@@ -48,6 +48,8 @@ Air clean D
 ---
 ### *Bath / full test*
 *CommandMeaning*
+`#AUTO-DROP-ON*` / `#AUTO-DROP-OFF*`
+Sample drop mode — send **before** SET-TEMP / TS / RPM / DUR / SML / FL (bath locks after FL → `#RECIPE,ACK*`)
 `#SET-TEMP-37.0*`
 Set bath temperature
 `#TS-03*`
@@ -61,13 +63,11 @@ Per-step duration (hh:mm:ss)
 `#SML,1-10,2-15*`
 Per-step sample volume (ml)
 `#FL,1-2,2-3*`
-Per-step flush (ml)
-`#AUTO-DROP-ON*` / `#AUTO-DROP-OFF*`
-Auto tablet drop
+Per-step flush (ml) — bath then emits `#RECIPE,ACK*`
 `#PRE-HEAT*`
 Start preheat → `#PRE-HEAT,ACK*` then async `#PRE-DONE*`
-`#STOP-HEAT*`
-Stop heater → `#STOP-HEAT,ACK*`
+`#STOP-PRE-HEAT*`
+Stop / cancel preheat → `#STOP-PRE-HEAT,ACK*`
 `#START-TEST*`
 Start test (new run; clears PF chain state)
 `#PAUSE-TEST*`

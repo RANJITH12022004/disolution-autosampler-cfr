@@ -484,7 +484,7 @@ static void bathLoadRecipeSeq(float temp, uint8_t steps,
 }
 
 static void bathPreHeat()      { bathSendBody("PRE-HEAT"); }
-static void bathStopHeat()     { bathSendBody("STOP-HEAT"); }
+static void bathStopHeat()     { bathSendBody("STOP-PRE-HEAT"); }
 static void bathStartTest() {
     // Drop any chain/PF state left behind by the previous test before it can
     // mis-route the first CMT of this one

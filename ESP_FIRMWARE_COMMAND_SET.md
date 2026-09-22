@@ -43,19 +43,20 @@ Pi uploads **remaining** steps only, renumbered `1…N` (max **12** steps).
 
 | # | Pi → ESP | ESP → Pi | Meaning |
 |---|----------|----------|---------|
-| 1 | `#SET-TEMP-37.0*` | `#SET-TEMP-37.0,ACK*` | Set bath temperature first |
-| 2 | `#TS-03*` | `#TS-03ACK*` or `#TS-03,ACK*` | Total step count (`NN` = 2-digit, e.g. `01`…`12`) |
-| 3 | `#RPM,1-100,2-150,3-300*` | `#RPM,1-100,2-150,3-300,ACK*` (or echo+ACK) | RPM per step: `stepIndex-rpm` |
-| 4 | `#DUR,1-00:05,2-00:10,3-00:55*` | `#DUR,…,ACK*` | Duration per step: every token is `index-MM:SS` (or `HH:MM:SS`) |
-| 5 | `#SML,1-10,2-15,3-13*` | `#SML,…,ACK*` | Sample volume (ml) per step: `index-volume` |
-| 6 | `#FL,1-2,2-3,3-2*` | `#FL,ACK*` | Flush / rinse volume (ml) per step: `index-volume` |
-| 7 | `#AUTO-DROP-ON*` or `#AUTO-DROP-OFF*` | `#AUTO-DROP-ON,ACK*` / `#AUTO-DROP-OFF,ACK*` | Sample Drop Auto / Manual |
-| — | *(async after full recipe)* | `#RECIPE,ACK*` | Full recipe accepted |
+| 1 | `#AUTO-DROP-ON*` or `#AUTO-DROP-OFF*` | `#AUTO-DROP-ON,ACK*` / `#AUTO-DROP-OFF,ACK*` | Sample Drop Auto / Manual (**before** recipe params) |
+| 2 | `#SET-TEMP-37.0*` | `#SET-TEMP-37.0,ACK*` | Set bath temperature |
+| 3 | `#TS-03*` | `#TS-03ACK*` or `#TS-03,ACK*` | Total step count (`NN` = 2-digit, e.g. `01`…`12`) |
+| 4 | `#RPM,1-100,2-150,3-300*` | `#RPM,1-100,2-150,3-300,ACK*` (or echo+ACK) | RPM per step: `stepIndex-rpm` |
+| 5 | `#DUR,1-00:05,2-00:10,3-00:55*` | `#DUR,…,ACK*` | Duration per step: every token is `index-MM:SS` (or `HH:MM:SS`) |
+| 6 | `#SML,1-10,2-15,3-13*` | `#SML,…,ACK*` | Sample volume (ml) per step: `index-volume` |
+| 7 | `#FL,1-2,2-3,3-2*` | `#FL,ACK*` | Flush / rinse volume (ml) per step: `index-volume` |
+| — | *(async after FL / full recipe)* | `#RECIPE,ACK*` | Full recipe accepted (bath locks) |
 | — | *(async on bad recipe)* | `#ERR,RCP,ACK*` | Recipe rejected |
 
 **Notes for firmware**
-- Temperature **must** be sent first (`#SET-TEMP-…*`).
-- After all recipe frames ACK, ESP must emit `#RECIPE,ACK*` (or `#ERR,RCP,ACK*` on failure).
+- `#AUTO-DROP-*` **must** be sent before recipe parameters. Sending it after `#RECIPE,ACK*` causes `#ERR,LOCK*`.
+- Temperature is sent after AUTO-DROP (`#SET-TEMP-…*`).
+- After recipe parameter frames ACK, ESP must emit `#RECIPE,ACK*` (or `#ERR,RCP,ACK*` on failure).
 - Store the uploaded recipe until `#START-TEST*` or a new upload replaces it.
 - On power-loss resume within buffer, Pi sends `#PF-RESUME-TEST*` (bath NVS continues). Soft pause uses `#RESUME-TEST*`.
 
@@ -66,7 +67,7 @@ Pi uploads **remaining** steps only, renumbered `1…N` (max **12** steps).
 | # | Pi → ESP | ESP → Pi | Meaning |
 |---|----------|----------|---------|
 | 1 | `#PRE-HEAT*` | `#PRE-HEATTING,ACK*` then async `#PRE-DONE,ACK*` | Preheat until set temperature reached |
-| 2 | `#STOP-HEAT*` | `#STOP-HEAT,ACK*` | Stop bath heater (manual / Settings) |
+| 2 | `#STOP-PRE-HEAT*` | `#STOP-PRE-HEAT,ACK*` | Stop / cancel preheat (manual / Settings / abort preheat) |
 | 3 | `#START-TEST*` | `#START-TEST,ACK*` | Start (or resume after re-upload) using last recipe |
 | 4 | `#PAUSE-TEST*` | `#PAUSE-TEST,ACK*` | Pause timers / motion as designed |
 | 5 | `#STOP-TEST*` | `#STOP-TEST,ACK*` | Abort / stop test |
@@ -247,7 +248,7 @@ Reply may be `#csv*` or bare `csv*` — Pi accepts both.
 #RESUME-TEST*
 #PF-RESUME-TEST*
 #STOP-TEST*
-#STOP-HEAT*
+#STOP-PRE-HEAT*
 #MDV-500* / #MDV-900*
 #START-PLD-<n>*
 #STOP-PLD*

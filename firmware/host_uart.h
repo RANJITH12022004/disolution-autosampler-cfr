@@ -445,9 +445,9 @@ static void hostHandleLine(String line) {
         hostAck("PRE-HEAT");
         return;
     }
-    if (up == "STOP-HEAT" || up == "HEATER-OFF") {
+    if (up == "STOP-PRE-HEAT" || up == "STOP-HEAT" || up == "HEATER-OFF") {
         bathStopHeat();
-        hostAck("STOP-HEAT");
+        hostAck("STOP-PRE-HEAT");
         return;
     }
     if (up == "START-TEST" || up == "RUN-TEST" || up == "TEST-START") {

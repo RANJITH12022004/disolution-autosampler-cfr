@@ -176,12 +176,20 @@ def case_pf_protocol_builders():
     else:
         fail("9 Beep clamp failed: {}".format(proto.build_beep(5)))
     frames = proto.build_recipe_frames(
-        {"temperature": 37, "mediaVolume": 900, "steps": [{"rpm": 50, "durationSeconds": 60, "sampleVolume": 10}]}
+        {"temperature": 37, "mediaVolume": 900, "mode": "auto", "steps": [{"rpm": 50, "durationSeconds": 60, "sampleVolume": 10}]}
     )
+    if frames and frames[0] == "#AUTO-DROP-ON*":
+        ok("9 Recipe frames start with AUTO-DROP-ON")
+    else:
+        fail("9 AUTO-DROP not first: {}".format(frames[:3] if frames else None))
     if any("MDV-900" in f for f in frames):
         ok("9 Recipe frames include MDV-900")
     else:
         fail("9 MDV missing from frames: {}".format(frames))
+    if frames and frames[-1].startswith("#FL,"):
+        ok("9 Recipe frames end with FL (before RECIPE,ACK)")
+    else:
+        fail("9 FL not last param frame: {}".format(frames[-1] if frames else None))
 
 
 def case_a4_performed_by():

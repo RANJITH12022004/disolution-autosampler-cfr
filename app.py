@@ -1246,6 +1246,93 @@ def _audit_report_pdf_generated(report_id, report=None) -> None:
     _audit(None, None, "Report PDF generated", detail)
 
 
+def _format_recipe_audit_details(recipe: dict, recipe_id=None) -> str:
+    """Operator-facing recipe parameter summary for create/edit audit rows."""
+    r = recipe or {}
+    parts = []
+    rid = recipe_id if recipe_id is not None else r.get("id")
+    if rid is not None:
+        parts.append("id {}".format(rid))
+    name = (r.get("productName") or r.get("name") or "").strip()
+    if name:
+        parts.append("product {}".format(name))
+    mode = (r.get("mode") or "").strip()
+    if mode:
+        parts.append("mode {}".format(mode))
+    usp = (r.get("usp") or r.get("uspMode") or "").strip()
+    if usp:
+        parts.append("USP {}".format(usp))
+    if r.get("temperature") is not None and str(r.get("temperature")).strip() != "":
+        parts.append("temperature {} °C".format(r.get("temperature")))
+    media = (r.get("media") or "").strip()
+    if media:
+        parts.append("media {}".format(media))
+    mv = (r.get("mediaVolume") or "").strip() if r.get("mediaVolume") is not None else ""
+    if mv:
+        parts.append("media volume {} mL".format(mv))
+    if r.get("mediaPh") is not None and str(r.get("mediaPh")).strip() != "":
+        parts.append("media pH {}".format(r.get("mediaPh")))
+    sv = str(r.get("sampleVolume") or "").strip()
+    if sv:
+        parts.append("sample volume {} mL".format(sv))
+    rv = str(r.get("rinseVolume") or "").strip()
+    if rv:
+        parts.append("rinse volume {} mL".format(rv))
+    if r.get("powerFailure") is not None and str(r.get("powerFailure")).strip() != "":
+        parts.append("power failure {} min".format(r.get("powerFailure")))
+    bs = str(r.get("batchSize") or "").strip()
+    if bs:
+        parts.append("batch size {}".format(bs))
+    rep = str(r.get("replenishment") or "").strip()
+    if rep:
+        parts.append("replenishment {}".format(rep))
+    steps = r.get("steps") if isinstance(r.get("steps"), list) else []
+    if steps:
+        step_bits = []
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            rpm = step.get("rpm")
+            dur = step.get("durationSeconds")
+            if dur is None:
+                dur = step.get("duration")
+            try:
+                dur_i = int(float(dur)) if dur is not None and str(dur).strip() != "" else None
+            except (TypeError, ValueError):
+                dur_i = None
+            if dur_i is not None and dur_i >= 0:
+                hh = dur_i // 3600
+                mm = (dur_i % 3600) // 60
+                ss = dur_i % 60
+                dur_txt = "{:02d}:{:02d}:{:02d}".format(hh, mm, ss)
+            else:
+                dur_txt = str(dur or "--")
+            s_sv = str(step.get("sampleVolume") or "").strip()
+            bit = "step {} RPM {} duration {}".format(i + 1, rpm if rpm is not None else "--", dur_txt)
+            if s_sv:
+                bit = "{} sample {} mL".format(bit, s_sv)
+            step_bits.append(bit)
+        if step_bits:
+            parts.append("{} step(s): {}".format(len(step_bits), "; ".join(step_bits)))
+    return " | ".join(parts) if parts else "—"
+
+
+def _format_member_permissions_detail(member: dict, username: str = "") -> str:
+    """Full permission-card list granted to a profile (operator-facing)."""
+    cards = _member_permission_card_set(member)
+    labels = _permission_card_labels(cards)
+    uname = username or (member or {}).get("username") or (member or {}).get("name") or "--"
+    role = _display_role_label((member or {}).get("role") or "")
+    parts = ["User {}".format(uname)]
+    if role:
+        parts.append("role {}".format(role))
+    if labels:
+        parts.append("permissions: {}".format(", ".join(labels)))
+    else:
+        parts.append("permissions: none")
+    return " | ".join(parts)
+
+
 def _format_report_audit_details(report_id, enriched):
     """Build audit trail details: saved report name, recipe, batch."""
     if not enriched:
@@ -1341,10 +1428,7 @@ def create_recipe():
         if tok_err:
             return jsonify({"error": tok_err}), 401
         recipe_id = data_service.save_recipe(processed)
-        rlabel = processed.get("name") or processed.get("productName") or ""
-        rd = "Recipe created: {}".format(rlabel or ("id {}".format(recipe_id)))
-        if recipe_id:
-            rd = "{} (id {})".format(rd, recipe_id)
+        rd = _format_recipe_audit_details(processed, recipe_id)
         _audit(None, None, "Recipe created", rd)
         if processed.get("recipeApprovalStatus") == "approved":
             if via_token:
@@ -1401,10 +1485,7 @@ def update_recipe(recipe_id):
         if tok_err:
             return jsonify({"error": tok_err}), 401
         data_service.save_recipe(processed)
-        rlabel = processed.get("name") or processed.get("productName") or ""
-        rd = "Recipe id {}".format(recipe_id)
-        if rlabel:
-            rd = "{}: {}".format(rd, rlabel)
+        rd = _format_recipe_audit_details(processed, recipe_id)
         _audit(None, None, "Recipe edited", rd)
         if processed.get("recipeApprovalStatus") == "approved":
             if via_token:
@@ -1875,13 +1956,16 @@ def create_member():
         }
         uname = created.get("username") or created.get("name") or ""
         urole = created.get("role") or ""
+        perm_detail = _format_member_permissions_detail(created, uname)
         _audit_event(
             action="Added new user",
             outcome="success",
             entity_type="member",
             entity_id=member_id,
             entity_name=uname,
-            details="Added new user: {} ({})".format(uname, _display_role_label(urole) if urole else "—"),
+            details=perm_detail or "Added new user: {} ({})".format(
+                uname, _display_role_label(urole) if urole else "—"
+            ),
             target_user=uname,
             after=data_service.sanitize_member_for_client(created) or created,
             signature=sig,
@@ -2005,20 +2089,25 @@ def update_member(member_id):
             )
         permission_detail = _member_permission_change_detail(before_member, updated, uname)
         profile_detail = _member_profile_change_detail(before_member, updated, uname)
-        # Prefer permission detail; for profile, drop status-only lines already covered above.
-        update_details = permission_detail
-        if not update_details and profile_detail:
-            if became_disabled or became_enabled:
-                parts = [p for p in str(profile_detail).split(" | ") if "Status:" not in p]
-                # Drop leading "Profile updated for X" if nothing else remains.
-                if len(parts) <= 1 and parts and parts[0].startswith("Profile updated"):
-                    update_details = None
-                else:
-                    update_details = " | ".join(parts) if parts else None
-            else:
-                update_details = profile_detail
-        if not update_details and not password_changed and not became_disabled and not became_enabled:
-            update_details = "Profile updated for {}".format(uname or "--")
+        full_perm_labels = _permission_card_labels(_member_permission_card_set(updated))
+        full_perm_txt = (
+            "permissions: {}".format(", ".join(full_perm_labels))
+            if full_perm_labels else "permissions: none"
+        )
+        detail_parts = []
+        if permission_detail:
+            detail_parts.append(permission_detail)
+        elif profile_detail and not (became_disabled or became_enabled):
+            detail_parts.append(profile_detail)
+        elif profile_detail and (became_disabled or became_enabled):
+            parts = [p for p in str(profile_detail).split(" | ") if "Status:" not in p]
+            if not (len(parts) <= 1 and parts and parts[0].startswith("Profile updated")):
+                detail_parts.extend(parts)
+        if not detail_parts and not password_changed and not became_disabled and not became_enabled:
+            detail_parts.append("Profile updated for {}".format(uname or "--"))
+        if permission_detail or detail_parts:
+            detail_parts.append(full_perm_txt)
+        update_details = " | ".join(detail_parts) if detail_parts else None
         if update_details:
             _audit_event(
                 action="User update",
@@ -3368,14 +3457,48 @@ def _format_wall_datetime_for_audit(dt_value) -> str:
         return s
 
 
+def _humanize_audit_action(action: str) -> str:
+    """Map legacy/dev action labels to operator-facing audit trail terms."""
+    a = str(action or "").strip()
+    mapping = {
+        "Report preview viewed": "Report opened",
+        "Reports exported": "Report exported",
+        "Print A4": "Report printed",
+        "Print thermal": "Report printed",
+        "ESP recipe uploaded": "Recipe loaded",
+        "Loaded recipe": "Recipe loaded",
+        "Started dissolution test": "Test started",
+        "Resumed dissolution test": "Test resumed",
+        "Completed dissolution test": "Test finished",
+        "Aborted dissolution test": "Test aborted",
+        "ESP START-TEST": "Test started",
+        "ESP END-TEST": "Test finished",
+        "Heater on": "Heater started",
+        "Heater off": "Heater stopped",
+    }
+    return mapping.get(a, a)
+
+
 def _humanize_audit_details(action: str, details: str) -> str:
     """Normalize verbose/internal audit detail text for UI and PDF export."""
     action = str(action or "").strip()
     details = audit_service._details_audit_display(details)
     if not details:
         return details
+    # Strip known developer protocol jargon only (not general words like USP/RPM).
+    import re
+    details = re.sub(
+        r"#(?:STOP-PRE-HEAT|STOP-HEAT|PRE-HEAT|PRE-DONE|START-TEST|STOP-TEST|END-TEST|RESUME-TEST|PF-RESUME-TEST|SET-TEMP|AUTO-DROP)[A-Z0-9_,.-]*\*?",
+        "",
+        details,
+        flags=re.I,
+    )
+    details = re.sub(r"\b(?:ACK|ESP)\b", "", details, flags=re.I)
+    details = re.sub(r"\s*\|\s*loaded to ESP\b", "", details, flags=re.I)
+    details = re.sub(r"Heater accepted preheat command", "Preheat started", details, flags=re.I)
+    details = re.sub(r"Operator cancelled preheat[^.|]*", "Preheat stopped", details, flags=re.I)
+    details = re.sub(r"\s{2,}", " ", details).strip(" |")
     if action in ("Power interruption", "Power interruption logout"):
-        import re
         if "privileged factory session" in details.lower():
             return "Unclean shutdown during factory session"
         m = re.search(r"User\s+([^\s]+)\s+was logged in", details, re.I)
@@ -3387,8 +3510,7 @@ def _humanize_audit_details(action: str, details: str) -> str:
         if "kiosk-bridge" in details.lower() or "clean shutdown" in details.lower():
             return "Unclean shutdown during active session"
         return details
-    if action == "Reports exported":
-        import re
+    if action in ("Reports exported", "Report exported"):
         if details.lower().startswith("exported "):
             return details
         m = re.search(r"\bok=(\d+)", details)
@@ -3396,7 +3518,7 @@ def _humanize_audit_details(action: str, details: str) -> str:
             n = int(m.group(1))
             return "Exported {} report{} to USB".format(n, "" if n == 1 else "s")
         return "Exported report(s) to USB"
-    if action in ("Print thermal", "Print A4"):
+    if action in ("Print thermal", "Print A4", "Report printed"):
         details = (
             details.replace(" | full data", "")
             .replace("| full data", "")
@@ -3404,13 +3526,13 @@ def _humanize_audit_details(action: str, details: str) -> str:
             .replace("| inline", "")
             .strip()
         )
-        import re
         m = re.search(r"report\s+id\s+(\d+)", details, re.I)
         if m:
             return "Report id {}".format(m.group(1))
+        if details.lower().startswith("recipe"):
+            return details
         return details
     if action == "Report PDF generated":
-        import re
         m = re.search(r"report\s+id\s+(\d+)", details, re.I)
         if not m:
             m = re.search(r"report\s+(\d+)", details, re.I)
@@ -3426,7 +3548,6 @@ def _humanize_audit_details(action: str, details: str) -> str:
             return "Report id {}".format(rid)
         return "Report PDF saved"
     if action in ("Report aborted", "Report aborted (power loss)", "Report approved", "Test performed", "Quick test performed", "Validation performed"):
-        import re
         details = re.sub(
             r"\s*\|\s*awaiting approval \(PDF after approval\)",
             " | awaiting approval",
@@ -3437,12 +3558,10 @@ def _humanize_audit_details(action: str, details: str) -> str:
     if action == "System date change":
         if details.lower().startswith("changed from"):
             return details
-        import re
         if re.match(r"^\d{4}-\d{2}-\d{2}T", details):
             return "Set to {}".format(_format_wall_datetime_for_audit(details))
         return _format_wall_datetime_for_audit(details)
     if "/opt/kiosk/" in details or "/media/" in details:
-        import re
         details = re.sub(
             r"report\s+(\d+)\s*->\s*\S+",
             r"Report id \1",
@@ -3456,9 +3575,28 @@ def _humanize_audit_details(action: str, details: str) -> str:
 def _audit_entry_should_omit(entry: dict) -> bool:
     """Drop noisy or sensitive rows from operator-facing audit views."""
     action = str(entry.get("action") or "").strip()
-    outcome = str(entry.get("outcome") or "").strip().lower()
     details = str(entry.get("details") or "").strip().lower()
     if action == "Login" and "invalid username" in details:
+        return True
+    # Pure navigation / screen hop noise — only keep meaningful operator actions.
+    if action in (
+        "Entered screen",
+        "Exited screen",
+        "Entered USP validation",
+        "Opened Quick Test",
+        "Opened Load Recipe",
+        "Opened Manage Recipe",
+        "Opened Create Recipe",
+        "Opened disabled recipes",
+    ):
+        return True
+    # Developer / protocol protocol confirmation rows.
+    if action in (
+        "ESP START-TEST",
+        "ESP END-TEST",
+        "ESP PF-RESUME-TEST",
+        "ESP recipe uploaded",
+    ):
         return True
     return False
 
@@ -3469,8 +3607,10 @@ def _prepare_audit_entries_for_display(entries):
         if _audit_entry_should_omit(entry):
             continue
         row = dict(entry)
+        orig_action = row.get("action")
         row["role"] = _display_role_label(row.get("role"))
-        row["details"] = _humanize_audit_details(row.get("action"), row.get("details"))
+        row["details"] = _humanize_audit_details(orig_action, row.get("details"))
+        row["action"] = _humanize_audit_action(orig_action)
         out.append(row)
     return out
 
@@ -3872,12 +4012,25 @@ def get_report_preview(report_id):
             if not (pending and op and cur_u and cur_u == op):
                 return jsonify({"error": "Forbidden. You do not have permission to view reports."}), 403
         rtype = (report.get("type") or "").strip().lower() or "report"
-        _audit(
-            None,
-            None,
-            "Report preview viewed",
-            "Report id {} | type {}".format(report_id, rtype),
-        )
+        rname = ""
+        try:
+            recipe = report.get("recipe") or {}
+            td = report.get("testData") or {}
+            rname = (
+                recipe.get("productName")
+                or recipe.get("name")
+                or td.get("productName")
+                or (td.get("recipe") or {}).get("productName")
+                or ""
+            )
+        except Exception:
+            rname = ""
+        detail = "Report id {}".format(report_id)
+        if rname:
+            detail = "{} | {}".format(detail, rname)
+        if rtype and rtype != "report":
+            detail = "{} | {}".format(detail, rtype)
+        _audit(None, None, "Report opened", detail)
         preview_data = report_service.get_report_preview_data(report)
         return jsonify({"preview": preview_data}), 200
     except Exception as e:
@@ -4136,7 +4289,7 @@ def export_reports():
         ok_count = len(exported_files)
         _audit(
             None, None,
-            "Reports exported",
+            "Report exported",
             "Exported {} report{} to USB".format(
                 ok_count, "" if ok_count == 1 else "s"
             ),
@@ -4307,7 +4460,7 @@ def export_reports_stream():
             ok_count = result["count"]
             _audit(
                 None, None,
-                "Reports exported",
+                "Report exported",
                 "Exported {} report{} to USB".format(
                     ok_count, "" if ok_count == 1 else "s"
                 ),
@@ -4393,7 +4546,7 @@ def print_a4():
                     pass
             result = print_service.print_recipe_a4(recipe_data)
             rname = recipe_data.get("productName") or recipe_data.get("name") or ""
-            _audit(None, None, "Print A4", "recipe | {}".format(rname or "—"))
+            _audit(None, None, "Report printed", "Recipe | {}".format(rname or "—"))
             return jsonify(result), 200
         report_data = data.get("report_data", {}) or {}
         report_id = report_data.get("id")
@@ -4410,7 +4563,7 @@ def print_a4():
                     pass
                 result = print_service.print_a4_report(report_data)
                 if result.get("success"):
-                    _audit(None, None, "Print A4", "Report id {}".format(report_id))
+                    _audit(None, None, "Report printed", "Report id {}".format(report_id))
                 return jsonify(result), 200 if result.get("success") else 500
         blocked = _check_report_approved_for_print_export(report_data=report_data)
         if blocked is not None:
@@ -4429,7 +4582,7 @@ def print_a4():
         _audit(
             None,
             None,
-            "Print A4",
+            "Report printed",
             "Report id {}".format(rid if rid is not None else "—"),
         )
         return jsonify(result), 200
@@ -5521,13 +5674,13 @@ def disso_hw_heater_on():
         timeout=timeout_f,
     )
     if result.get("ok"):
-        _audit(None, None, "Heater on", "temp {}".format(result.get("temperature") or temperature or "—"))
+        _audit(None, None, "Heater started", "Temperature {}".format(result.get("temperature") or temperature or "—"))
     return jsonify(result), 200 if result.get("ok") else 400
 
 
 @app.route("/api/hardware/disso/heater/off", methods=["POST"])
 def disso_hw_heater_off():
-    """#STOP-HEAT* for Settings heater OFF."""
+    """#STOP-PRE-HEAT* for Settings heater OFF / cancel preheat."""
     gate = _require_any_session_internal(
         ["heater-control", "quick-test", "recipe-test"],
         "Forbidden. You do not have permission to control the heater.",
@@ -5546,7 +5699,7 @@ def disso_hw_heater_off():
         pass
     result = disso_cmd_hardware.stop_heater()
     if result.get("ok"):
-        _audit(None, None, "Heater off", "Heater stopped")
+        _audit(None, None, "Heater stopped", "Heater stopped")
     return jsonify(result), 200 if result.get("ok") else 400
 
 

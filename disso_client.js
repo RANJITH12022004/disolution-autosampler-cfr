@@ -370,15 +370,22 @@
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
   }
 
-  function _openPendingReportWhenReady(rid) {
-    if (_runEndedApplied) return;
-    if (!rid) return;
+  function markRunEndedApplied() {
     _runEndedApplied = true;
     if (_reportOpenRetryTimer) {
       clearTimeout(_reportOpenRetryTimer);
       _reportOpenRetryTimer = null;
     }
     stopStatePolling();
+  }
+
+  /** Latch closed so abort UI + END-TEST / state poll do not double-open the pending report. */
+  window.dissoMarkRunEndedApplied = markRunEndedApplied;
+
+  function _openPendingReportWhenReady(rid) {
+    if (_runEndedApplied) return;
+    if (!rid) return;
+    markRunEndedApplied();
     if (typeof finishTestRunReportSaved === 'function') {
       try { finishTestRunReportSaved(rid); } catch (e) { /* ignore */ }
     }
@@ -453,6 +460,7 @@
       _runEndedApplied = false;
       _runEndedUiCleared = false;
       window._dissoCompletionBeepPlayed = false;
+      try { window._lastOpenedEndedReportId = null; } catch (eClr) { /* ignore */ }
     }
     window._dissoServerRunActive = !!(st.active && (
       st.runStatus === 'RUNNING' ||

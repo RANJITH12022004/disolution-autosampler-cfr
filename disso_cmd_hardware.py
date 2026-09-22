@@ -513,20 +513,21 @@ def _simulate_handle_tx(frame: str) -> str:
             _sim["step_index"] = 0
         return inner + (",ACK" if ",ACK" not in upper else "")
     if upper.startswith("SML,") or upper.startswith("FL,") or upper.startswith("FL-"):
+        # Bath locks recipe after FL and emits RECIPE,ACK (AUTO-DROP is sent first).
+        if upper.startswith("FL,") or upper.startswith("FL-"):
+            threading.Timer(0.2, lambda: _handle_rx_inner("RECIPE,ACK")).start()
         return inner + (",ACK" if ",ACK" not in upper else "")
     if upper in ("AUTO-DROP-ON", "AUTO-DROP-OFF"):
-        # After full recipe, firmware emits RECIPE,ACK
-        threading.Timer(0.2, lambda: _handle_rx_inner("RECIPE,ACK")).start()
         return upper + ",ACK"
     if upper == "PRE-HEAT":
         threading.Timer(0.6, lambda: _handle_rx_inner("PRE-DONE,ACK")).start()
         with _sim_lock:
             _sim["heater_on"] = True
         return "PRE-HEATTING,ACK"
-    if upper == "STOP-HEAT":
+    if upper in ("STOP-PRE-HEAT", "STOP-HEAT"):
         with _sim_lock:
             _sim["heater_on"] = False
-        return "STOP-HEAT,ACK"
+        return "STOP-PRE-HEAT,ACK"
     if upper == "START-TEST":
         with _sim_lock:
             _sim["running"] = True
@@ -645,7 +646,7 @@ def _wait_for_recipe_complete(timeout: float = 5.0) -> Dict[str, Any]:
         return {"ok": True, "ack": already}
 
     if _simulate:
-        # Simulator emits RECIPE,ACK shortly after AUTO-DROP ACK
+        # Simulator emits RECIPE,ACK shortly after FL ACK (recipe lock)
         deadline = time.time() + timeout
         while time.time() < deadline:
             inner = _pop_next_ack(timeout=0.2)
@@ -681,8 +682,9 @@ def _wait_for_recipe_complete(timeout: float = 5.0) -> Dict[str, Any]:
 def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_sec_in_step: Optional[int] = None) -> Dict[str, Any]:
     """
     Recipe load order:
-      #SET-TEMP-* → #TS-NN* → [#MDV-*] → #RPM,…* → #DUR,…* → #SML,…* → #FL,1-n,…* → #AUTO-DROP-*
+      #AUTO-DROP-* → #SET-TEMP-* → #TS-NN* → [#MDV-*] → #RPM,…* → #DUR,…* → #SML,…* → #FL,1-n,…*
     then wait for final #RECIPE,ACK* (fail on #ERR,RCP*).
+    AUTO-DROP must be first — bath locks after FL; late AUTO-DROP → #ERR,LOCK*.
 
     Early #RECIPE,ACK* before all frames are sent is latched but does NOT stop
     remaining frame TX — ESP may emit RECIPE early; Pi still completes the recipe set.
@@ -693,6 +695,8 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
 
     def _expect_for_frame(frame: str) -> Optional[str]:
         inner = (frame or "").strip().lstrip("#").rstrip("*").upper()
+        if inner.startswith("AUTO-DROP"):
+            return "AUTO-DROP"
         if inner.startswith("SET-TEMP"):
             return "SET-TEMP"
         if inner.startswith("TS-"):
@@ -707,8 +711,6 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
             return "SML"
         if inner.startswith("FL"):
             return "FL"
-        if inner.startswith("AUTO-DROP"):
-            return "AUTO-DROP"
         return None
 
     with _bus_lock:
@@ -898,8 +900,8 @@ def start_heater(temperature: Any = None, wait_done: bool = False, timeout: floa
 
 
 def stop_heater() -> Dict[str, Any]:
-    """Send #STOP-HEAT* (manual heater OFF)."""
-    res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-HEAT")
+    """Send #STOP-PRE-HEAT* (cancel preheat / heater OFF)."""
+    res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-PRE-HEAT")
     if res.get("ok"):
         res["heater"] = "off"
     return res

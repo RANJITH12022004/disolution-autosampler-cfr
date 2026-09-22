@@ -537,7 +537,7 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
         "at": op["at"],
     }
 
-    # Recipe frames (SET-TEMP → TS → RPM → DUR → SML → FL → AUTO-DROP) are uploaded on Load.
+    # Recipe frames (AUTO-DROP → SET-TEMP → TS → RPM → DUR → SML → FL) are uploaded on Load.
     # Start: shaft DOWN → wait LF-CL-HOME → #START-TEST* (timer / run state begin only after ACK).
     start_res = cmd_hw.start_test()
     if not start_res.get("ok"):
@@ -593,8 +593,11 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
         _set_step_deadline_locked(steps[0]["durationSeconds"])
         _arm_print_interval_locked()
     _persist(force=True)
-    _audit("Test started", "{} | steps {}".format(started.get("name"), len(steps)))
-    _audit("ESP START-TEST", "ok")
+    product = recipe.get("productName") or recipe.get("name") or started.get("name") or "Recipe"
+    _audit(
+        "Test started",
+        "{} | {} step(s)".format(product, len(steps)),
+    )
     return {"ok": True, "state": get_state()}
 
 
@@ -660,18 +663,18 @@ def resume_esp(user: Optional[Dict[str, Any]] = None, force_reupload: bool = Fal
         if user:
             _run.setdefault("operators", []).append(_operator_entry(user, "resume"))
     _persist(force=True)
-    _audit("Test resumed", "RESUME-TEST")
+    _audit("Test resumed", "")
     return {"ok": True, "state": get_state()}
 
 
 def _retry_pf_resume(user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Retry #PF-RESUME-TEST* when boot auto-resume left POWER_RESUME_PENDING."""
+    """Retry power-loss resume when boot auto-resume left POWER_RESUME_PENDING."""
     pf_res = cmd_hw.pf_resume_test()
     if not pf_res.get("ok"):
-        _audit("ESP PF-RESUME-TEST", str(pf_res.get("error") or "failed"))
+        _audit("Power resume failed", str(pf_res.get("error") or "failed"))
         return {
             "ok": False,
-            "error": pf_res.get("error") or "PF-RESUME-TEST failed",
+            "error": pf_res.get("error") or "Power resume failed",
             "pf": pf_res,
         }
     with _lock:
@@ -686,8 +689,7 @@ def _retry_pf_resume(user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if user:
             _run.setdefault("operators", []).append(_operator_entry(user, "continue"))
     _persist(force=True)
-    _audit("ESP PF-RESUME-TEST", "ok | claim retry")
-    _audit("Test continued", "PF-RESUME-TEST after pending")
+    _audit("Test continued", "Resumed after power interruption")
     return {"ok": True, "state": get_state()}
 
 
@@ -798,8 +800,6 @@ def _complete(aborted: bool = False, user: Optional[Dict[str, Any]] = None, reas
         _run.clear()
         _run.update(run)
     _audit("Test aborted" if aborted else "Test finished", "report id {}".format(report_id or "—"))
-    if not aborted:
-        _audit("ESP END-TEST", "ok" if not reason else reason)
     return {"ok": True, "aborted": aborted, "reportId": report_id, "state": get_state()}
 
 
@@ -950,24 +950,18 @@ def try_startup_power_recovery() -> Dict[str, Any]:
     _persist(force=True)
     if pf_res.get("ok"):
         _audit(
-            "ESP PF-RESUME-TEST",
-            "ok | outage {}s | step {}".format(outage_sec, adjusted.get("stepIndex")),
-        )
-        _audit(
             "Power auto-resume",
-            "outage {}s <= {}min | method=PF-RESUME-TEST | recovered=True".format(outage_sec, pf),
+            "outage {}s | step {} | resumed".format(outage_sec, adjusted.get("stepIndex")),
         )
     else:
-        _audit("ESP PF-RESUME-TEST", str(pf_res.get("error") or "failed"))
+        _audit("Power resume failed", str(pf_res.get("error") or "failed"))
         _audit(
             "Power resume pending",
-            "outage {}s <= {}min | PF-RESUME failed".format(outage_sec, pf),
+            "outage {}s | waiting for operator continue".format(outage_sec),
         )
         _audit(
             "Power auto-resume",
-            "outage {}s <= {}min | method=PF-RESUME-TEST | recovered=False pending=True".format(
-                outage_sec, pf
-            ),
+            "outage {}s | pending operator action".format(outage_sec),
         )
     return {
         "recovered": recovered,

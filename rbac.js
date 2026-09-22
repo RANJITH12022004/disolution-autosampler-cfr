@@ -402,6 +402,10 @@ function checkNavigationAccess(screenId) {
   if (screenId === 'validate') {
     return canAccessValidationOrCalibration(userObj || role);
   }
+  if (screenId === 'reports') {
+    var ru = userObj || role;
+    return canAccess(ru, 'reports-view') || canAccess(ru, 'audit-view');
+  }
   if (screenId === 'vessel-temperature' || screenId === 'shaft-position') {
     var u = userObj || role;
     return canAccess(u, 'recipe-test') || canAccess(u, 'quick-test') || canAccess(u, 'heater-control') || canAccess(u, 'shaft-control');

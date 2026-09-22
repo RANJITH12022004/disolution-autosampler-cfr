@@ -81,4 +81,12 @@ dtoverlay=i2c-rtc,ds1307
 
 ## Power failure resume
 
-Recipe field `powerFailure` (1–60 min). On unclean restart within that window the Pi auto re-uploads remaining steps and `#START-TEST*` without login. On any login, Continue/Abort modal records multi-operator trail on the report.
+Recipe field `powerFailure` (1–60 min). On unclean restart:
+
+1. **Over buffer** → aborted report with remarks `power interruption`, pending e-signature approval.
+2. **Within buffer and remaining recipe time exhausted during outage** → completion report (pending approval); best-effort `#STOP-TEST*`.
+3. **Within buffer with time left** → Pi sends `#PF-RESUME-TEST*` in the background **without login** (bath NVS continues the test; no recipe re-upload / `#START-TEST*`).
+4. Soft pause still uses `#RESUME-TEST*` only.
+5. On any login while a run is active: Continue/Abort modal. Continue while already `RUNNING` records the operator only (no second UART start). Both starter and continuer/aborter appear under **Performed by** on the report / A4 print.
+
+See `firmware/commands` for `#PF-RESUME-TEST*` / `#PF-STATUS*`.

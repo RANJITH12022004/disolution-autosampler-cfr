@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=95">
+    <link rel="stylesheet" href="styles.css?v=96">
 </head>
 
 <body>
@@ -185,7 +185,7 @@
                         <line x1="16" y1="17" x2="8" y2="17"></line>
                         <polyline points="10 9 9 9 8 9"></polyline>
                     </svg>
-                    <span>Reports</span>
+                    <span>Reports / Audit</span>
                 </button>
                 <button class="nav-item" data-page="settings" data-rbac-nav="settings">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1132,7 +1132,8 @@
                 <!-- Recipe Print Preview Page -->
                 <div class="page" id="page-recipe-print-preview">
                     <div class="reports-container" style="overflow-y: auto;">
-                        <div class="report-preview-container recipe-print-container" id="recipe-print-content">
+                        <div class="report-preview-container recipe-print-container report-a4-preview" id="recipe-print-content">
+                            <div class="report-a4-paper">
                             <h1>RAISE LAB EQUIPMENT</h1>
                             <h2>Dissolution Tester - Recipe</h2>
                             <h2 id="recipe-print-company-name">COMPANY NAME</h2>
@@ -1178,6 +1179,7 @@
                                 </thead>
                                 <tbody id="recipe-print-tolerance-body"></tbody>
                             </table>
+                            </div>
                         </div>
                         <div class="report-preview-actions">
                             <button class="btn-print" onclick="handlePrintRecipeA4()">Print A4</button>
@@ -1867,9 +1869,39 @@
                                 <input type="hidden" id="sys-temp-tolerance" value="Disable">
                                 <div class="system-settings-tolerance-value-wrap" id="sys-temp-tolerance-value-wrap" hidden>
                                     <label for="sys-temp-tolerance-value">Tolerance (°C)</label>
-                                    <input type="number" id="sys-temp-tolerance-value" class="input-field sys-set-tol-input"
-                                        min="0.1" max="10" step="0.1" placeholder="e.g. 0.5"
+                                    <input type="text" id="sys-temp-tolerance-value" class="input-field sys-set-tol-input decimal-input"
+                                        inputmode="decimal" data-decimal-input="true"
+                                        placeholder="e.g. 0.5"
                                         onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                </div>
+                            </section>
+
+                            <section class="sys-set-section" aria-label="Print interval">
+                                <div class="sys-set-row">
+                                    <div class="sys-set-copy">
+                                        <h3 class="sys-set-section-title">Print Interval</h3>
+                                        <p class="sys-set-note">Periodic A4 status slip during a running test</p>
+                                    </div>
+                                    <div class="sys-set-seg" role="group" aria-label="Print interval setting">
+                                        <button type="button" class="sys-set-seg-btn" id="sys-print-interval-enable"
+                                            data-group="printInterval" data-value="Enable" onclick="selectSystemSettingCard(this)">Enable</button>
+                                        <button type="button" class="sys-set-seg-btn is-selected" id="sys-print-interval-disable"
+                                            data-group="printInterval" data-value="Disable" onclick="selectSystemSettingCard(this)">Disable</button>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="sys-print-interval" value="Disable">
+                                <div class="system-settings-tolerance-value-wrap" id="sys-print-interval-value-wrap" hidden>
+                                    <label for="sys-print-interval-value">Every</label>
+                                    <input type="text" id="sys-print-interval-value" class="input-field sys-set-tol-input"
+                                        inputmode="numeric" placeholder="e.g. 5"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
+                                    <div class="sys-set-seg" role="group" aria-label="Print interval unit">
+                                        <button type="button" class="sys-set-seg-btn is-selected" id="sys-print-interval-unit-minutes"
+                                            data-group="printIntervalUnit" data-value="minutes" onclick="selectSystemSettingCard(this)">Minutes</button>
+                                        <button type="button" class="sys-set-seg-btn" id="sys-print-interval-unit-seconds"
+                                            data-group="printIntervalUnit" data-value="seconds" onclick="selectSystemSettingCard(this)">Seconds</button>
+                                    </div>
+                                    <input type="hidden" id="sys-print-interval-unit" value="minutes">
                                 </div>
                             </section>
                         </div>
@@ -2770,9 +2802,9 @@
     <script src="keyboard.js?v=3"></script>
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
-    <script src="rbac.js?v=8"></script>
-    <script src="disso_client.js?v=13"></script>
-    <script src="script.js?v=113"></script>
+    <script src="rbac.js?v=9"></script>
+    <script src="disso_client.js?v=15"></script>
+    <script src="script.js?v=115"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

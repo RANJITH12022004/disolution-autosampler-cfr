@@ -4294,6 +4294,13 @@ body {
     overflow: auto;
 }
 
+.recipe-print-container .report-a4-paper,
+.recipe-print-container .report-a4-paper h1,
+.recipe-print-container .report-a4-paper h2,
+.recipe-print-container .report-a4-paper h3 {
+    color: #000000;
+}
+
 .report-a4-pre {
     margin: 0;
     padding: 0;

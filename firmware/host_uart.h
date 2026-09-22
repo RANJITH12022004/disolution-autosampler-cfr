@@ -18,7 +18,15 @@
  *   Host → Master : #COMMAND*
  *   Master → Host : #...,ACK*  |  #ERR,CODE,ACK*  |  async events forwarded
  *
- * Uses UART0 (USB Serial stays on CDC; UART1=sampler, UART2=bath).
+ * The ESP32-S3 has only three UARTs: UART1 = sampler, UART2 = bath, so the
+ * host link can only live on UART0 — and UART0 is also the serial monitor
+ * unless Tools → "USB CDC On Boot" = Enabled (then the monitor is the native
+ * USB port and UART0 is free). Taking UART0 while it is the monitor is what
+ * made all the #...* traffic show up in the serial monitor.
+ *
+ *   USB CDC On Boot = Enabled  → host link active on GPIO41/16 @ 9600
+ *   USB CDC On Boot = Disabled → host link OFF (HTTP /cmd still available),
+ *                                UART0 stays the serial monitor
  */
 
 #define HOST_UART_TX_PIN   41
@@ -26,7 +34,14 @@
 #define HOST_UART_BAUD     9600
 #define HOST_FRAME_MAX     220
 
+#if ARDUINO_USB_CDC_ON_BOOT
+#define HOST_UART_ENABLED  1
+#else
+#define HOST_UART_ENABLED  0
+#endif
+
 static HardwareSerial HostSerial(0);
+static UartFramer g_hostFramer;
 
 static String g_hostLastRx = "";
 static String g_hostLastAck = "";
@@ -40,6 +55,7 @@ extern void addLog(const String& line);
 extern void uartSend(const String& bodyNoHashStar);
 extern void uartSendRawFrame(const String& frame);
 extern void queueSamplingCycle(float sv, float fh, int st, float flt, bool fromAuto);
+extern void buzzerBeepMs(uint32_t ms);
 extern float g_smpFillSec;
 extern float g_rphFillSec;
 extern float g_dclFillSec;
@@ -58,13 +74,20 @@ static void hostLog(const String& line) {
     if (g_hostLogFn) g_hostLogFn(line);
 }
 
+static void hostWrite(const String& frame) {
+    if (!HOST_UART_ENABLED) return;
+    String f = frame;
+    f += '\n';
+    HostSerial.print(f);          // one write() per frame
+    g_hostTxCount++;
+}
+
 static void hostSendRaw(const String& frameIn) {
     String f = frameIn;
     f.trim();
     if (!f.startsWith("#")) f = "#" + f;
     if (!f.endsWith("*")) f += "*";
-    HostSerial.println(f);
-    g_hostTxCount++;
+    hostWrite(f);
     g_hostLastAck = f;
     hostLog("HOST TX " + f);
 }
@@ -81,14 +104,13 @@ static void hostErr(const char* code) {
 
 /** Forward async events from bath/sampler up to the host controller. */
 static void hostForward(const String& line) {
-    if (line.length() == 0) return;
+    if (!HOST_UART_ENABLED || line.length() == 0) return;
     String f = line;
     f.trim();
     if (!f.startsWith("#")) f = "#" + f;
     if (!f.endsWith("*")) f += "*";
-    HostSerial.println(f);
-    g_hostTxCount++;
-    hostLog("HOST FWD " + f);
+    hostWrite(f);
+    // Avoid log spam (every RX was also HOST FWD) — web stays responsive
 }
 
 static float hostTagF(const String& up, const char* tag, float defVal) {
@@ -149,6 +171,26 @@ static void hostHandleLine(String line) {
     }
     if (up == "HELP") {
         hostAck("HELP,SEE-DOCS");
+        return;
+    }
+
+    // Buzzer on GPIO42 — ACK format matches host request (#BEEP-ACK* etc.)
+    if (up == "BEEP") {
+        buzzerBeepMs(200);
+        hostSendRaw("#BEEP-ACK*");
+        g_hostState = "IDLE";
+        return;
+    }
+    if (up == "BEEP-1") {
+        buzzerBeepMs(1000);
+        hostSendRaw("#BEEP-1-ACK*");
+        g_hostState = "IDLE";
+        return;
+    }
+    if (up == "BEEP-2") {
+        buzzerBeepMs(2000);
+        hostSendRaw("#BEEP-2-ACK*");
+        g_hostState = "IDLE";
         return;
     }
 
@@ -348,6 +390,14 @@ static void hostHandleLine(String line) {
         hostAck("SML");
         return;
     }
+    // Media volume: #MDV-500* / #MDV-900* — forwarded to the bath, which replies
+    // #MDV-nnn,ACK*. That reply is mirrored to the host, so no local ACK here.
+    if (up.startsWith("MDV-") || up.startsWith("MEDIA-VOL-")) {
+        int dash = up.lastIndexOf('-');
+        uint16_t ml = (uint16_t)up.substring(dash + 1).toInt();
+        if (!bathSetMediaVolume(ml)) { hostErr("MDV"); return; }
+        return;
+    }
     if (up.startsWith("FL,") && !up.startsWith("FLT")) {
         bathSetFlList(up.substring(3));
         hostAck("FL");
@@ -366,8 +416,8 @@ static void hostHandleLine(String line) {
             if (i < 0) return "";
             i += key.length();
             int end = (int)up.length();
-            const char* nxt[] = {",TEMP-", ",TS-", ",RPM-", ",DUR-", ",SML-", ",FL-"};
-            for (int t = 0; t < 6; t++) {
+            const char* nxt[] = {",TEMP-", ",TS-", ",MDV-", ",RPM-", ",DUR-", ",SML-", ",FL-"};
+            for (int t = 0; t < 7; t++) {
                 // skip the same tag family
                 if (String(nxt[t] + 1) == key) continue;
                 int j = up.indexOf(nxt[t], i);
@@ -380,11 +430,12 @@ static void hostHandleLine(String line) {
         String dur = sectionAfter("DUR-");
         String sml = sectionAfter("SML-");
         String fl  = sectionAfter("FL-");
+        uint16_t mdv = (uint16_t)hostTagF(up, "MDV-", 0);
         if (rpm.length() == 0 || dur.length() == 0 || sml.length() == 0 || fl.length() == 0) {
             hostErr("RECIPE");
             return;
         }
-        bathLoadRecipeSeq(temp, ts, rpm, dur, sml, fl);
+        bathLoadRecipeSeq(temp, ts, rpm, dur, sml, fl, mdv);
         hostAck("RECIPE");
         return;
     }
@@ -394,7 +445,7 @@ static void hostHandleLine(String line) {
         hostAck("PRE-HEAT");
         return;
     }
-    if (up == "STOP-HEAT" || up == "HEAT-STOP") {
+    if (up == "STOP-HEAT" || up == "HEATER-OFF") {
         bathStopHeat();
         hostAck("STOP-HEAT");
         return;
@@ -412,6 +463,11 @@ static void hostHandleLine(String line) {
     if (up == "RESUME-TEST") {
         bathResumeTest();
         hostAck("RESUME-TEST");
+        return;
+    }
+    if (up == "PF-RESUME-TEST" || up == "PF-RESUME") {
+        bathPfResumeTest();
+        hostAck("PF-RESUME-TEST");
         return;
     }
     if (up == "STOP-TEST" || up == "TEST-STOP") {
@@ -491,33 +547,27 @@ static void hostHandleLine(String line) {
 }
 
 static void hostPoll() {
-    static char buf[HOST_FRAME_MAX];
-    static size_t len = 0;
+    if (!HOST_UART_ENABLED) return;
+    static String frame;
     while (HostSerial.available()) {
         char c = (char)HostSerial.read();
-        if (c == '\n' || c == '\r') {
-            if (len > 0) {
-                buf[len] = 0;
-                hostHandleLine(String(buf));
-                len = 0;
-            }
-        } else if (len + 1 < sizeof(buf)) {
-            buf[len++] = c;
-        } else {
-            len = 0;
-            hostErr("OVF");
-        }
+        if (g_hostFramer.feed(c, frame)) hostHandleLine(frame);
     }
 }
 
 static void hostUartBegin() {
+#if HOST_UART_ENABLED
     HostSerial.setRxBufferSize(1024);
     HostSerial.setTxBufferSize(512);
     HostSerial.begin(HOST_UART_BAUD, SERIAL_8N1, HOST_UART_RX_PIN, HOST_UART_TX_PIN);
     HostSerial.setTimeout(10);
     g_hostState = "IDLE";
-    hostLog("Host UART ready @9600 TX41/RX16");
+    hostLog("Host UART ready @9600 TX41/RX16 (UART0, monitor on USB CDC)");
     hostAck("READY,MASTER");
+#else
+    g_hostState = "OFF";
+    hostLog("Host UART OFF: UART0 is the serial monitor (enable 'USB CDC On Boot' to use GPIO41/16)");
+#endif
 }
 
 #endif

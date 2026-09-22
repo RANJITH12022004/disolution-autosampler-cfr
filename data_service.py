@@ -1120,11 +1120,15 @@ _SYSTEM_SETTINGS_DEFAULTS = {
     "beep": "Enable",
     "tempTolerance": "Disable",
     "tempToleranceValue": None,
+    "printInterval": "Disable",
+    "printIntervalValue": None,
+    "printIntervalUnit": "minutes",
 }
 
 _SYSTEM_SETTINGS_ENABLE_KEYS = (
     "beep",
     "tempTolerance",
+    "printInterval",
 )
 
 
@@ -1154,6 +1158,39 @@ def _normalize_temp_tolerance_value(value: Any, enabled: bool) -> Any:
     return round(num, 2)
 
 
+def _normalize_print_interval_unit(value: Any) -> str:
+    text = str(value or "minutes").strip().lower()
+    if text in ("second", "seconds", "sec", "s"):
+        return "seconds"
+    return "minutes"
+
+
+def _normalize_print_interval_value(value: Any, enabled: bool) -> Any:
+    if not enabled:
+        return None
+    if value is None or value == "":
+        return None
+    try:
+        num = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    if num < 1:
+        return None
+    return num
+
+
+def get_print_interval_seconds(settings: Optional[Dict[str, Any]] = None) -> int:
+    """Return interval seconds for live A4 slips, or 0 if disabled."""
+    s = settings if isinstance(settings, dict) else get_system_settings()
+    if _normalize_enable_disable(s.get("printInterval"), "Disable") != "Enable":
+        return 0
+    val = _normalize_print_interval_value(s.get("printIntervalValue"), True)
+    if not val:
+        return 0
+    unit = _normalize_print_interval_unit(s.get("printIntervalUnit"))
+    return int(val) if unit == "seconds" else int(val) * 60
+
+
 def get_system_settings() -> Dict[str, Any]:
     """Get Dissolution instrument system settings."""
     path = _get_storage_path("systemSettings.json")
@@ -1172,6 +1209,11 @@ def get_system_settings() -> Dict[str, Any]:
     temp_enabled = settings.get("tempTolerance") == "Enable"
     settings["tempToleranceValue"] = _normalize_temp_tolerance_value(
         settings.get("tempToleranceValue"), temp_enabled
+    )
+    print_enabled = settings.get("printInterval") == "Enable"
+    settings["printIntervalUnit"] = _normalize_print_interval_unit(settings.get("printIntervalUnit"))
+    settings["printIntervalValue"] = _normalize_print_interval_value(
+        settings.get("printIntervalValue"), print_enabled
     )
 
     return settings
@@ -1192,6 +1234,11 @@ def save_system_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     temp_enabled = merged.get("tempTolerance") == "Enable"
     merged["tempToleranceValue"] = _normalize_temp_tolerance_value(
         merged.get("tempToleranceValue"), temp_enabled
+    )
+    print_enabled = merged.get("printInterval") == "Enable"
+    merged["printIntervalUnit"] = _normalize_print_interval_unit(merged.get("printIntervalUnit"))
+    merged["printIntervalValue"] = _normalize_print_interval_value(
+        merged.get("printIntervalValue"), print_enabled
     )
 
     path = _get_storage_path("systemSettings.json")

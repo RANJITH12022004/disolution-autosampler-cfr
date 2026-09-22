@@ -649,6 +649,9 @@ function friendlyHardwareError(errOrMsg, fallback) {
     if (/#INIT\b|INIT,ACK|\bINIT\*/.test(u) || u === 'INIT' || u.indexOf('INIT ACK') >= 0) {
         return 'Hardware initialise failed. Try again.';
     }
+    if (/ERR,UNK|UNK,ACK/.test(u)) {
+        return 'Hardware command not supported. Try again.';
+    }
     if (/RECIPE|ERR,RCP/.test(u)) {
         return 'Recipe prepare failed. Try again.';
     }
@@ -2704,6 +2707,12 @@ function refreshShellAccessVisibility() {
             ok = true;
         } else if (page === 'validate' && typeof canAccessValidationOrCalibration === 'function') {
             ok = !!(u && canAccessValidationOrCalibration(u));
+        } else if (page === 'reports') {
+            ok = !!(u && (
+                (typeof userCanViewReports === 'function' && userCanViewReports(u)) ||
+                (typeof canViewAuditLog === 'function' && canViewAuditLog()) ||
+                (typeof canAccess === 'function' && canAccess(u, 'reports-view'))
+            ));
         } else if (u && typeof canAccess === 'function') {
             ok = canAccess(u, feat);
         } else if (!u) {
@@ -2941,7 +2950,20 @@ function goToPage(pageName) {
     }
     if (pageName === 'reports' && typeof loadReports === 'function') {
         if (typeof refreshReportsActionButtons === 'function') refreshReportsActionButtons();
-        setTimeout(function () { loadReports(currentReportFilter || null); }, 50);
+        if (typeof initAuditReportsVisibility === 'function') initAuditReportsVisibility();
+        setTimeout(function () {
+            var canReports = typeof userCanViewReports === 'function' && userCanViewReports();
+            var canAudit = typeof canViewAuditLog === 'function' && canViewAuditLog();
+            var filter = currentReportFilter || null;
+            if (!canReports && canAudit) {
+                filter = 'audit';
+            } else if (!filter && canReports) {
+                filter = null;
+            } else if (!filter && canAudit) {
+                filter = 'audit';
+            }
+            loadReports(filter);
+        }, 50);
     }
     if (pageName === 'report-preview' && typeof refreshReportsActionButtons === 'function') {
         setTimeout(refreshReportsActionButtons, 50);
@@ -6486,6 +6508,7 @@ function _populateAuditFilterDropdowns(userEl, actionEl, fullList) {
         'Recipe created', 'Recipe edited', 'Recipe approved', 'Approval verification',
         'Disable Recipe', 'Recipe disabled', 'Recipe enabled',
         'Added new user', 'Password changed', 'Profile updated', 'User create', 'User update',
+        'User enable', 'User disable', 'User unlock', 'Login', 'Biometric login',
         'Audit log viewed', 'Print A4',
         'System date change', 'RTC date set', 'Factory settings changed',
         'Hardware calibration', 'Validation load'
@@ -6562,6 +6585,21 @@ function setReportsAuditMode(isAudit) {
 }
 
 function loadReports(filterType) {
+    var canReports = typeof userCanViewReports === 'function' ? userCanViewReports() : true;
+    var canAudit = typeof canViewAuditLog === 'function' ? canViewAuditLog() : false;
+    if (!filterType || filterType === 'all') {
+        if (!canReports && canAudit) {
+            filterType = 'audit';
+        }
+    }
+    if (filterType !== 'audit' && !canReports) {
+        if (canAudit) {
+            filterType = 'audit';
+        } else {
+            showAppModal('You do not have permission to view reports.', 'Reports');
+            return;
+        }
+    }
     currentReportFilter = filterType || null;
     if (filterType === 'test' || filterType === 'validation' || filterType === 'calibration') {
         lastReportListFilter = filterType;
@@ -6755,14 +6793,26 @@ function refreshAuditUiAfterAuth() {
 }
 
 function initAuditReportsVisibility() {
+    var canReports = typeof userCanViewReports === 'function' ? userCanViewReports() : true;
+    var canAudit = typeof canViewAuditLog === 'function' ? canViewAuditLog() : false;
     var auditBtn = document.querySelector('.reports-filter-audit');
     if (auditBtn) {
-        auditBtn.style.display = canViewAuditLog() ? '' : 'none';
+        auditBtn.style.display = canAudit ? '' : 'none';
     }
     var exportAuditCard = document.getElementById('export-audit-trails-card');
     if (exportAuditCard) {
-        exportAuditCard.style.display = canViewAuditLog() ? '' : 'none';
+        exportAuditCard.style.display = canAudit ? '' : 'none';
     }
+    [
+        '.reports-filter-test',
+        '.reports-filter-validation',
+        '.reports-filter-calibration',
+        '.reports-filter-export',
+        '.reports-filter-recipes'
+    ].forEach(function (sel) {
+        var el = document.querySelector(sel);
+        if (el) el.style.display = canReports ? '' : 'none';
+    });
 }
 
 function filterReports(type) {
@@ -7304,6 +7354,7 @@ function buildReportPrintPayload(preview, reportId) {
         completedAt: preview.completedAt || td.completedAt,
         operatorName: preview.operatorName || td.operatorName,
         employeeId: preview.employeeId || td.employeeId,
+        operatorTrail: preview.operatorTrail || td.operatorTrail || [],
         validationRuns: preview.validationRuns || td.validationRuns
     };
 }
@@ -9811,7 +9862,10 @@ function loadLoginFactorySettingsDisplay() {
 var SYSTEM_SETTINGS_DEFAULTS = {
     beep: 'Enable',
     tempTolerance: 'Disable',
-    tempToleranceValue: null
+    tempToleranceValue: null,
+    printInterval: 'Disable',
+    printIntervalValue: null,
+    printIntervalUnit: 'minutes'
 };
 
 function selectSystemSettingCard(btn) {
@@ -9829,6 +9883,13 @@ function selectSystemSettingCard(btn) {
         var tolHidden = document.getElementById('sys-temp-tolerance');
         if (tolHidden) tolHidden.value = value;
         syncTempToleranceFieldVisibility();
+    } else if (group === 'printInterval') {
+        var piHidden = document.getElementById('sys-print-interval');
+        if (piHidden) piHidden.value = value;
+        syncPrintIntervalFieldVisibility();
+    } else if (group === 'printIntervalUnit') {
+        var unitHidden = document.getElementById('sys-print-interval-unit');
+        if (unitHidden) unitHidden.value = value;
     }
 }
 
@@ -9850,6 +9911,12 @@ function _sysApplyCardGroup(group, value) {
     } else if (group === 'tempTolerance') {
         var tolHidden = document.getElementById('sys-temp-tolerance');
         if (tolHidden) tolHidden.value = value;
+    } else if (group === 'printInterval') {
+        var piHidden = document.getElementById('sys-print-interval');
+        if (piHidden) piHidden.value = value;
+    } else if (group === 'printIntervalUnit') {
+        var unitHidden = document.getElementById('sys-print-interval-unit');
+        if (unitHidden) unitHidden.value = value;
     }
 }
 
@@ -9857,6 +9924,16 @@ function syncTempToleranceFieldVisibility() {
     var selectEl = document.getElementById('sys-temp-tolerance');
     var wrapEl = document.getElementById('sys-temp-tolerance-value-wrap');
     var valueEl = document.getElementById('sys-temp-tolerance-value');
+    if (!selectEl || !wrapEl) return;
+    var enabled = selectEl.value === 'Enable';
+    wrapEl.hidden = !enabled;
+    if (valueEl) valueEl.disabled = !enabled;
+}
+
+function syncPrintIntervalFieldVisibility() {
+    var selectEl = document.getElementById('sys-print-interval');
+    var wrapEl = document.getElementById('sys-print-interval-value-wrap');
+    var valueEl = document.getElementById('sys-print-interval-value');
     if (!selectEl || !wrapEl) return;
     var enabled = selectEl.value === 'Enable';
     wrapEl.hidden = !enabled;
@@ -9877,13 +9954,22 @@ function setSystemSettingsForm(settings) {
     var s = Object.assign({}, SYSTEM_SETTINGS_DEFAULTS, settings || {});
     _sysApplyCardGroup('beep', s.beep || 'Enable');
     _sysApplyCardGroup('tempTolerance', s.tempTolerance || 'Disable');
+    _sysApplyCardGroup('printInterval', s.printInterval || 'Disable');
+    _sysApplyCardGroup('printIntervalUnit', s.printIntervalUnit || 'minutes');
     var valueEl = document.getElementById('sys-temp-tolerance-value');
     if (valueEl) {
         valueEl.value = (s.tempToleranceValue != null && !isNaN(Number(s.tempToleranceValue)))
             ? String(s.tempToleranceValue)
             : '';
     }
+    var piValueEl = document.getElementById('sys-print-interval-value');
+    if (piValueEl) {
+        piValueEl.value = (s.printIntervalValue != null && !isNaN(Number(s.printIntervalValue)))
+            ? String(s.printIntervalValue)
+            : '';
+    }
     syncTempToleranceFieldVisibility();
+    syncPrintIntervalFieldVisibility();
     applyTempToleranceFromSettings(s);
 }
 
@@ -9892,10 +9978,19 @@ function collectSystemSettingsForm() {
     var tempTolerance = (document.getElementById('sys-temp-tolerance') || {}).value || 'Disable';
     var rawValue = valueEl ? String(valueEl.value || '').trim() : '';
     var parsedValue = rawValue === '' ? null : parseFloat(rawValue);
+    var printInterval = (document.getElementById('sys-print-interval') || {}).value || 'Disable';
+    var piValueEl = document.getElementById('sys-print-interval-value');
+    var piRaw = piValueEl ? String(piValueEl.value || '').trim() : '';
+    var piParsed = piRaw === '' ? null : parseInt(piRaw, 10);
+    var printIntervalUnit = (document.getElementById('sys-print-interval-unit') || {}).value || 'minutes';
+    if (printIntervalUnit !== 'seconds') printIntervalUnit = 'minutes';
     return {
         beep: (document.getElementById('sys-beep') || {}).value || 'Enable',
         tempTolerance: tempTolerance,
-        tempToleranceValue: tempTolerance === 'Enable' ? parsedValue : null
+        tempToleranceValue: tempTolerance === 'Enable' ? parsedValue : null,
+        printInterval: printInterval,
+        printIntervalValue: printInterval === 'Enable' ? piParsed : null,
+        printIntervalUnit: printIntervalUnit
     };
 }
 
@@ -9915,6 +10010,13 @@ function saveSystemSettings() {
         var tolVal = payload.tempToleranceValue;
         if (tolVal == null || isNaN(tolVal) || tolVal <= 0) {
             showAppModal('Please enter a tolerance value greater than 0 °C.', 'Test Settings');
+            return;
+        }
+    }
+    if (payload.printInterval === 'Enable') {
+        var piVal = payload.printIntervalValue;
+        if (piVal == null || isNaN(piVal) || piVal < 1) {
+            showAppModal('Please enter a print interval of 1 or greater.', 'Test Settings');
             return;
         }
     }

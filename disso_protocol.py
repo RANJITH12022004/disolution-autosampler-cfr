@@ -189,7 +189,7 @@ def build_recipe_frames(
     """
     Build UART-1 recipe upload frames for remaining steps (renumbered 1..N).
 
-    Order: SET-TEMP → TS → RPM → DUR → SML → FL → AUTO-DROP
+    Order: SET-TEMP → TS → [MDV] → RPM → DUR → SML → FL → AUTO-DROP
     Final #RECIPE,ACK* is waited separately after these frames.
     """
     steps = remaining_steps(recipe, from_step_index)
@@ -202,6 +202,10 @@ def build_recipe_frames(
     n = len(steps)
     frames = [wrap("SET-TEMP-{}".format(_fmt_set_temp(recipe)))]
     frames.append(wrap("TS-{:02d}".format(n)))
+
+    mdv_frame = build_mdv(recipe.get("mediaVolume"))
+    if mdv_frame:
+        frames.append(mdv_frame)
 
     rpm_parts = ["{}-{}".format(st["index"], st["rpm"]) for st in steps]
     frames.append(wrap("RPM," + ",".join(rpm_parts)))
@@ -375,6 +379,16 @@ def build_resume_test() -> str:
     return wrap("RESUME-TEST")
 
 
+def build_pf_resume_test() -> str:
+    """Continue interrupted test after power restore (bath NVS). Not soft-pause resume."""
+    return wrap("PF-RESUME-TEST")
+
+
+def build_pf_status() -> str:
+    """Query bath power-fail checkpoint (PEND-/ST-/PD-/HOLD-)."""
+    return wrap("PF-STATUS")
+
+
 def build_stop_test() -> str:
     return wrap("STOP-TEST")
 
@@ -388,12 +402,24 @@ def build_beep(count: int = 1) -> str:
     """
     Request audible beep on command ESP.
     count=1 → #BEEP*
-    count>1 → #BEEP-N* (N beeps)
+    count=2 → #BEEP-2*
+    Firmware only ACKs BEEP / BEEP-1 / BEEP-2 — clamp to 1–2.
     """
-    n = max(1, int(count or 1))
+    n = max(1, min(2, int(count or 1)))
     if n <= 1:
         return wrap("BEEP")
     return wrap("BEEP-{}".format(n))
+
+
+def build_mdv(ml: Any) -> Optional[str]:
+    """Media volume frame #MDV-500* or #MDV-900*, or None if invalid."""
+    try:
+        v = int(float(ml))
+    except (TypeError, ValueError):
+        return None
+    if v not in (500, 900):
+        return None
+    return wrap("MDV-{}".format(v))
 
 
 def build_pre_heat() -> str:

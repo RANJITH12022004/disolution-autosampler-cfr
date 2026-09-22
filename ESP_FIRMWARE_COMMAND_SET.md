@@ -57,7 +57,7 @@ Pi uploads **remaining** steps only, renumbered `1…N` (max **12** steps).
 - Temperature **must** be sent first (`#SET-TEMP-…*`).
 - After all recipe frames ACK, ESP must emit `#RECIPE,ACK*` (or `#ERR,RCP,ACK*` on failure).
 - Store the uploaded recipe until `#START-TEST*` or a new upload replaces it.
-- On power-loss resume, Pi re-uploads remaining steps (possibly shortened first-step duration) then `#START-TEST*` again. ESP does **not** keep mid-test recipe across power loss.
+- On power-loss resume within buffer, Pi sends `#PF-RESUME-TEST*` (bath NVS continues). Soft pause uses `#RESUME-TEST*`.
 
 ---
 
@@ -211,16 +211,18 @@ Reply may be `#csv*` or bare `csv*` — Pi accepts both.
 
 ### Pause / resume
 1. `#PAUSE-TEST*` → ACK  
-2. `#START-TEST*` again **or** Pi may re-upload then start (resume-after-power path always re-uploads)
+2. Soft resume: `#RESUME-TEST*` → ACK  
 
-### Power-loss recovery (Pi-owned)
-1. Pi decides within power-failure window  
-2. Pi re-uploads remaining steps (shortened first duration if needed)  
-3. `#START-TEST*`  
-ESP must not assume old RAM recipe survived brown-out.
+### Power-loss recovery (Pi + bath NVS)
+1. Pi measures outage vs recipe `powerFailure` minutes (RTC / lastHeartbeat)
+2. **Over window:** Pi saves aborted report (pending approval); do not resume ESP
+3. **Within window, remaining recipe time exhausted during outage:** Pi saves completion report; best-effort `#STOP-TEST*`
+4. **Within window with time left:** Pi sends `#PF-RESUME-TEST*` (no login, **no** recipe re-upload) → `#PF-RESUME-TEST,ACK*`
+5. Soft pause never uses PF-RESUME — only `#RESUME-TEST*`
+6. Login Continue while already RUNNING: operator trail only (no second START/PF-RESUME)
 
 ### Hardware initialise
-1. `#INIT*` → safe idle → `#INIT,ACK*`
+1. `#INIT*` → safe idle → `#INIT,ACK*` (legacy `#INI,ACK*` also accepted)
 
 ### Temperature calibration
 1. For each sensor: `#CAL,BT-xx*`, `#CAL,EXT-xx*`, `#CAL,VSL1-xx*` … `#CAL,VSL6-xx*` with ACK each
@@ -242,9 +244,13 @@ ESP must not assume old RAM recipe survived brown-out.
 #FL,1-v,2-v,…*
 #START-TEST*
 #PAUSE-TEST*
+#RESUME-TEST*
+#PF-RESUME-TEST*
 #STOP-TEST*
-#START-RPM-<n>*
-#STOP-RPM-<n>*
+#STOP-HEAT*
+#MDV-500* / #MDV-900*
+#START-PLD-<n>*
+#STOP-PLD*
 #LF-CU-UP*
 #LF-CU-DOWN*
 #LF-CU-STOP*
@@ -292,7 +298,7 @@ ESP must not assume old RAM recipe survived brown-out.
 - [ ] Temp cal BT/EXT/VSL1–6  
 - [ ] Sample cal VL → ENT → measured  
 - [ ] UART-2: 8-float CSV + `IDEL` / `TEST-RUNNING` statues  
-- [ ] No reliance on retaining recipe across power loss  
+- [ ] Power-fail within buffer uses `#PF-RESUME-TEST*` (bath NVS); over buffer aborts pending approval
 
 ---
 

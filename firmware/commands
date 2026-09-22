@@ -11,8 +11,8 @@ E-stop *sampler + bath*
 ---
 ### *Sampler*
 *CommandMeaning*
-`#INI*`
-Init
+`#INIT*` / `#INI*`
+Init (safe idle: stop PLD/test/lift, CLR-RECIPE, sampler INI) → `#INIT,ACK*` (or legacy `#INI,ACK*`)
 `#HOME*`
 Home
 `#ESTOP*`
@@ -49,56 +49,53 @@ Air clean D
 ### *Bath / full test*
 *CommandMeaning*
 `#SET-TEMP-37.0*`
-Set temp
+Set bath temperature
 `#TS-03*`
 Step count
+`#MDV-500*` / `#MDV-900*`
+Media volume (ml)
 `#RPM,1-100,2-150*`
-RPM list
-`#DUR,1-00:05,2-00:10*`
-Duration list
+Per-step RPM
+`#DUR,1-00:05:00,2-00:10:00*`
+Per-step duration (hh:mm:ss)
 `#SML,1-10,2-15*`
-Sample ml/step
+Per-step sample volume (ml)
 `#FL,1-2,2-3*`
-Flush ml/step → then `#RECIPE,ACK*`
-`#RECIPE,TEMP-37.0,TS-03,RPM-1-100,2-150,DUR-1-00:05,2-00:10,SML-1-10,2-15,FL-1-2,2-3*`
-One-shot recipe
-`#PRE-HEAT*`
-Preheat
-`#STOP-HEAT*`
-Stop bath heater (cancel preheat / Settings heater OFF)
-`#START-TEST*`
-Start test
-`#PAUSE-TEST*` / `#RESUME-TEST*` / `#STOP-TEST*`
-Test control
-`#BATH-ESTOP*`
-Bath E-stop only
-`#BATH-STATUS*`
-Bath status
-`#CLR-RECIPE*`
-Clear recipe
+Per-step flush (ml)
 `#AUTO-DROP-ON*` / `#AUTO-DROP-OFF*`
-Auto drop
+Auto tablet drop
+`#PRE-HEAT*`
+Start preheat → `#PRE-HEAT,ACK*` then async `#PRE-DONE*`
+`#STOP-HEAT*`
+Stop heater → `#STOP-HEAT,ACK*`
+`#START-TEST*`
+Start test (new run; clears PF chain state)
+`#PAUSE-TEST*`
+Pause
+`#RESUME-TEST*`
+Resume after soft pause (not power-fail)
+`#PF-RESUME-TEST*` / `#PF-RESUME*`
+Continue interrupted test after power restore → `#PF-RESUME-TEST,ACK*`
+Does **not** raise probe; sampler chain may still be active
+`#PF-STATUS*`
+Query bath power-fail checkpoint (`PEND-`, `ST-`, `PD-`, `HOLD-`)
+`#PF-TEST,…*`
+Async bath event: PF pending mid-test (master ACKs `#PF-TEST,ST-n,ACK*`)
+`#STOP-TEST*`
+Stop test
+`#CLR-RECIPE*`
+Clear bath recipe
 `#START-PLD-100*` / `#STOP-PLD*`
-Stirrer
+Stirrer on/off
 `#LF-CU-UP*` / `#LF-CU-DOWN*` / `#LF-CU-STOP*`
-Lift arm
+Lift column
+`#BEEP*` / `#BEEP-1*` / `#BEEP-2*`
+Audible beep (1 or 2 only)
 ---
-### *Passthrough*
-*CommandMeaning*
-`#RAW-SMP,INI*`
-Raw frame → sampler
-`#RAW-BATH,GET-STATUS*`
-Raw frame → bath
----
-### *Async events (master → host)*
-Master forwards bath/sampler traffic, including:
-- `#PRE-DONE,ACK*` · `#END-TEST,ACK*` · `#LF-CL-HOME,ACK*` · `#RECIPE,ACK*`
-- `#CMT,…,ACK*` · `#ERR,…,ACK*`
-- `#SMP-AUTO,ST-n,SV-x,FH-y*` — auto sample when probe arm goes DOWN
-Typical full-test sequence from the host device:
-#RECIPE,TEMP-37.0,TS-02,RPM-1-100,2-100,DUR-1-00:05,2-00:05,SML-1-10,2-10,FL-1-2,2-2*
-#PRE-HEAT*
- … wait #PRE-DONE,ACK*
-#START-TEST*
- … wait #SMP-AUTO… / #CMT… per step, then #END-TEST,ACK*
-Flash *master_URAT* only. Host UART cheat-sheet is also on the new *Host UART* web tab.
+### *Power-fail resume (Pi + bath)*
+
+1. Bath keeps mid-test NVS; master keeps sampler-chain NVS (`mst_pf`).
+2. On unclean Pi boot **within** recipe `powerFailure` minutes: Pi sends `#PF-RESUME-TEST*` (no login, no recipe re-upload).
+3. Soft pause uses `#RESUME-TEST*` only.
+4. Over buffer: Pi aborts report (pending approval); do not PF-RESUME.
+5. If wall-clock remaining recipe time was exhausted during outage (within buffer): Pi saves completion report; best-effort `#STOP-TEST*`.

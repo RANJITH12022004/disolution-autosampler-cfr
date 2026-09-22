@@ -12,7 +12,7 @@ import os
 import queue
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import disso_protocol as proto
 
@@ -350,11 +350,24 @@ def _should_retry_tx(result: Dict[str, Any]) -> bool:
     return True
 
 
+def _ack_matches(inner: str, expect_prefix: Optional[Union[str, Sequence[str]]] = None) -> bool:
+    if not expect_prefix:
+        return proto.is_ack(inner)
+    if isinstance(expect_prefix, str):
+        prefixes: Sequence[str] = (expect_prefix,)
+    else:
+        prefixes = expect_prefix
+    for p in prefixes:
+        if p and proto.is_ack(inner, str(p)):
+            return True
+    return False
+
+
 def _tx_once(
     frame: str,
     wait_ack: bool = True,
     timeout: float = 3.0,
-    expect_prefix: Optional[str] = None,
+    expect_prefix: Optional[Union[str, Sequence[str]]] = None,
 ) -> Dict[str, Any]:
     """Send one UART frame and optionally wait for a matching ACK."""
     frame = frame if frame.startswith("#") else proto.wrap(frame)
@@ -392,7 +405,7 @@ def _tx_once(
             # when they are ERR,RCP — still return so caller can fail fast.
             return {"ok": False, "error": inner, "tx": frame, "ack": inner}
         if expect_prefix:
-            if proto.is_ack(inner, expect_prefix):
+            if _ack_matches(inner, expect_prefix):
                 return {"ok": True, "tx": frame, "ack": inner}
             # Never drop async completions (RECIPE / PRE-DONE / HOME) while waiting
             # for a different command ACK — stash for later waiters.
@@ -410,7 +423,7 @@ def _tx(
     frame: str,
     wait_ack: bool = True,
     timeout: float = 3.0,
-    expect_prefix: Optional[str] = None,
+    expect_prefix: Optional[Union[str, Sequence[str]]] = None,
     retries: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
@@ -532,6 +545,20 @@ def _simulate_handle_tx(frame: str) -> str:
             if _sim["step_rem_sec"] <= 0:
                 _sim["step_rem_sec"] = max(1, int(_sim.get("step_set_sec") or 5))
         return "RESUME-TEST,ACK"
+    if upper == "PF-RESUME-TEST" or upper == "PF-RESUME":
+        with _sim_lock:
+            _sim["paused"] = False
+            _sim["running"] = True
+            if _sim["step_rem_sec"] <= 0:
+                _sim["step_rem_sec"] = max(1, int(_sim.get("step_set_sec") or 5))
+        return "PF-RESUME-TEST,ACK"
+    if upper == "PF-STATUS":
+        with _sim_lock:
+            pend = 1 if _sim.get("running") else 0
+            st = int(_sim.get("step_index") or 0) + 1
+        return "PF-STATUS,PEND-{},ST-{},PD-0,HOLD-0,ACK".format(pend, st)
+    if upper.startswith("MDV-") or upper.startswith("MEDIA-VOL-"):
+        return upper.split(",")[0] + ",ACK"
     if upper == "STOP-TEST":
         with _sim_lock:
             _sim["running"] = False
@@ -654,7 +681,7 @@ def _wait_for_recipe_complete(timeout: float = 5.0) -> Dict[str, Any]:
 def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_sec_in_step: Optional[int] = None) -> Dict[str, Any]:
     """
     Recipe load order:
-      #SET-TEMP-* → #TS-NN* → #RPM,…* → #DUR,…* → #SML,…* → #FL,1-n,…* → #AUTO-DROP-*
+      #SET-TEMP-* → #TS-NN* → [#MDV-*] → #RPM,…* → #DUR,…* → #SML,…* → #FL,1-n,…* → #AUTO-DROP-*
     then wait for final #RECIPE,ACK* (fail on #ERR,RCP*).
 
     Early #RECIPE,ACK* before all frames are sent is latched but does NOT stop
@@ -662,12 +689,31 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
     """
     frames = proto.build_recipe_frames(recipe, from_step_index=from_step_index, remaining_sec_in_step=remaining_sec_in_step)
     results = []
-    prefixes = ["SET-TEMP", "TS-", "RPM", "DUR", "SML", "FL", "AUTO-DROP"]
     recipe_seen: Optional[str] = None
+
+    def _expect_for_frame(frame: str) -> Optional[str]:
+        inner = (frame or "").strip().lstrip("#").rstrip("*").upper()
+        if inner.startswith("SET-TEMP"):
+            return "SET-TEMP"
+        if inner.startswith("TS-"):
+            return "TS-"
+        if inner.startswith("MDV-") or inner.startswith("MEDIA-VOL-"):
+            return "MDV"
+        if inner.startswith("RPM"):
+            return "RPM"
+        if inner.startswith("DUR"):
+            return "DUR"
+        if inner.startswith("SML"):
+            return "SML"
+        if inner.startswith("FL"):
+            return "FL"
+        if inner.startswith("AUTO-DROP"):
+            return "AUTO-DROP"
+        return None
 
     with _bus_lock:
         for i, frame in enumerate(frames):
-            expect = prefixes[i] if i < len(prefixes) else None
+            expect = _expect_for_frame(frame)
             res = _tx(frame, wait_ack=True, timeout=4.0, expect_prefix=expect)
             results.append(res)
             if not res.get("ok"):
@@ -969,13 +1015,32 @@ def pause_test() -> Dict[str, Any]:
 
 
 def resume_test() -> Dict[str, Any]:
-    """Send #RESUME-TEST* after a pause (not power-loss re-upload)."""
+    """Send #RESUME-TEST* after a soft pause (not power-loss)."""
     res = _tx(proto.build_resume_test(), timeout=5.0, expect_prefix="RESUME-TEST")
     if res.get("ok"):
         with _sim_lock:
             _sim["paused"] = False
             _sim["running"] = True
     return res
+
+
+def pf_resume_test() -> Dict[str, Any]:
+    """Send #PF-RESUME-TEST* to continue after power restore (bath NVS)."""
+    res = _tx(
+        proto.build_pf_resume_test(),
+        timeout=8.0,
+        expect_prefix=("PF-RESUME-TEST", "PF-RESUME"),
+    )
+    if res.get("ok"):
+        with _sim_lock:
+            _sim["paused"] = False
+            _sim["running"] = True
+    return res
+
+
+def pf_status() -> Dict[str, Any]:
+    """Optional diagnostic: query bath PF checkpoint."""
+    return _tx(proto.build_pf_status(), timeout=5.0, expect_prefix="PF-STATUS")
 
 
 def stop_test() -> Dict[str, Any]:
@@ -988,8 +1053,8 @@ def stop_test() -> Dict[str, Any]:
 
 
 def initialise() -> Dict[str, Any]:
-    """Send #INIT* and wait for #INIT,ACK*. Resets simulator to safe idle."""
-    res = _tx(proto.build_init(), expect_prefix="INIT")
+    """Send #INIT* and wait for #INIT,ACK* (or legacy #INI,ACK*). Resets simulator to safe idle."""
+    res = _tx(proto.build_init(), expect_prefix=("INIT", "INI"))
     if res.get("ok"):
         with _sim_lock:
             _sim["running"] = False
@@ -1005,7 +1070,7 @@ def initialize() -> Dict[str, Any]:
 
 
 def beep(count: int = 1) -> Dict[str, Any]:
-    """Send #BEEP* or #BEEP-N* and wait for ACK."""
+    """Send #BEEP* or #BEEP-1* / #BEEP-2* (clamped) and wait for ACK."""
     frame = proto.build_beep(count)
     expect = "BEEP"
     return _tx(frame, expect_prefix=expect)

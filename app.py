@@ -480,7 +480,20 @@ def _startup_session_power_audit():
         if needs_recovery:
             try:
                 recovery = disso_test_service.try_startup_power_recovery()
-                if recovery.get("aborted") and recovery.get("checkpoint"):
+                if recovery.get("needs_finalize") and recovery.get("checkpoint"):
+                    try:
+                        _finalize_interrupted_run_checkpoint(recovery["checkpoint"])
+                    except Exception:
+                        app.logger.exception("FINALIZING checkpoint recovery failed")
+                elif recovery.get("completed") and recovery.get("checkpoint"):
+                    try:
+                        _save_completion_report_from_power_checkpoint(
+                            recovery["checkpoint"],
+                            finished_during_outage=True,
+                        )
+                    except Exception:
+                        app.logger.exception("Finished-during-outage report save failed")
+                elif recovery.get("aborted") and recovery.get("checkpoint"):
                     cp = recovery["checkpoint"]
                     un = (pending or {}).get("username") or ""
                     try:
@@ -1949,6 +1962,10 @@ def update_member(member_id):
             "role": (cur.get("role") or "").strip() or "--",
         }
         uname = updated.get("username") or updated.get("name") or ""
+        before_status = str((before_member or {}).get("status") or "active").strip().lower()
+        after_status = str((updated or {}).get("status") or "active").strip().lower()
+        became_disabled = before_status != "disabled" and after_status == "disabled"
+        became_enabled = before_status == "disabled" and after_status == "active"
         if password_changed:
             _audit_event(
                 action="Password changed",
@@ -1960,10 +1977,47 @@ def update_member(member_id):
                 target_user=uname,
                 signature=sig,
             )
+        if became_disabled:
+            _audit_event(
+                action="User disable",
+                outcome="success",
+                entity_type="member",
+                entity_id=member_id,
+                entity_name=uname,
+                details="Member disabled by {}".format(sig.get("username") or "--"),
+                target_user=uname,
+                before=data_service.sanitize_member_for_client(before_member) if before_member else None,
+                after=data_service.sanitize_member_for_client(updated) or updated,
+                signature=sig,
+            )
+        elif became_enabled:
+            _audit_event(
+                action="User enable",
+                outcome="success",
+                entity_type="member",
+                entity_id=member_id,
+                entity_name=uname,
+                details="Member enabled by {}".format(sig.get("username") or "--"),
+                target_user=uname,
+                before=data_service.sanitize_member_for_client(before_member) if before_member else None,
+                after=data_service.sanitize_member_for_client(updated) or updated,
+                signature=sig,
+            )
         permission_detail = _member_permission_change_detail(before_member, updated, uname)
         profile_detail = _member_profile_change_detail(before_member, updated, uname)
-        update_details = permission_detail or profile_detail
-        if not update_details and not password_changed:
+        # Prefer permission detail; for profile, drop status-only lines already covered above.
+        update_details = permission_detail
+        if not update_details and profile_detail:
+            if became_disabled or became_enabled:
+                parts = [p for p in str(profile_detail).split(" | ") if "Status:" not in p]
+                # Drop leading "Profile updated for X" if nothing else remains.
+                if len(parts) <= 1 and parts and parts[0].startswith("Profile updated"):
+                    update_details = None
+                else:
+                    update_details = " | ".join(parts) if parts else None
+            else:
+                update_details = profile_detail
+        if not update_details and not password_changed and not became_disabled and not became_enabled:
             update_details = "Profile updated for {}".format(uname or "--")
         if update_details:
             _audit_event(
@@ -2503,6 +2557,15 @@ def login():
                     after={"username": user.get("username"), "role": user.get("role")},
                 )
                 return jsonify({"success": True, "user": data_service.sanitize_member_for_client(user) or user}), 200
+            _audit_event(
+                action="Login",
+                outcome="failed",
+                entity_type="session",
+                entity_name="password",
+                details="Invalid password (factory user)",
+                target_user=username,
+                extra={"attemptedUser": username, "method": "password"},
+            )
             return jsonify({"error": "Invalid username or password"}), 401
 
         # Normal member: check status first
@@ -2510,10 +2573,10 @@ def login():
         if member:
             status = str(member.get("status") or "active").strip().lower()
             if status == "locked":
-                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account locked", target_user=username)
+                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account locked", target_user=username, extra={"attemptedUser": username, "method": "password"})
                 return jsonify({"error": "Account locked. Contact admin."}), 403
             if status == "disabled":
-                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account disabled", target_user=username)
+                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account disabled", target_user=username, extra={"attemptedUser": username, "method": "password"})
                 return jsonify({"error": "Account disabled by admin."}), 403
 
         # Try authenticate
@@ -2581,15 +2644,65 @@ def login():
             remaining = max(0, 3 - fa)
             # If this attempt caused the account to become locked, show lockout immediately
             if status == "locked":
-                _audit_event(action="Login", outcome="denied", entity_type="session", entity_name="password", details="Account locked after failed attempts", target_user=username)
+                _audit_event(
+                    action="Login",
+                    outcome="failed",
+                    entity_type="session",
+                    entity_name="password",
+                    details="Invalid password (attempt {} of 3); account locked".format(fa),
+                    target_user=username,
+                    entity_id=updated.get("id"),
+                    extra={
+                        "attemptedUser": username,
+                        "failedAttempts": fa,
+                        "remainingAttempts": 0,
+                        "method": "password",
+                        "memberId": updated.get("id"),
+                    },
+                )
+                _audit_event(
+                    action="Login",
+                    outcome="denied",
+                    entity_type="session",
+                    entity_name="password",
+                    details="Account locked after failed attempts",
+                    target_user=username,
+                    entity_id=updated.get("id"),
+                    extra={"attemptedUser": username, "failedAttempts": fa, "method": "password"},
+                )
                 return jsonify({
                     "error": "Account locked. Contact admin.",
                     "remainingAttempts": 0
                 }), 403
+            _audit_event(
+                action="Login",
+                outcome="failed",
+                entity_type="session",
+                entity_name="password",
+                details="Invalid password (attempt {} of 3)".format(fa),
+                target_user=username,
+                entity_id=updated.get("id"),
+                extra={
+                    "attemptedUser": username,
+                    "failedAttempts": fa,
+                    "remainingAttempts": remaining,
+                    "method": "password",
+                    "memberId": updated.get("id"),
+                },
+            )
             return jsonify({
                 "error": "Invalid username or password.",
                 "remainingAttempts": remaining
             }), 401
+        _audit_event(
+            action="Login",
+            outcome="failed",
+            entity_type="session",
+            entity_name="password",
+            details="Unknown user",
+            target_user=username or "--",
+            extra={"attemptedUser": username or "--", "method": "password"},
+        )
         return jsonify({"error": "Invalid username or password"}), 401
     except Exception as e:
         app.logger.exception("Error during login")
@@ -3795,7 +3908,11 @@ def _report_pdf_status_allowed(report: dict) -> bool:
     if not report or not _report_requires_approval(report):
         return True
     st = str(report.get("reportApprovalStatus") or "").strip().lower()
-    return st in ("approved", "aborted")
+    if st in ("approved", "aborted"):
+        return True
+    # Dissolution may leave approval pending after abort; run status is authoritative.
+    run_st = str(report.get("status") or "").strip().lower()
+    return run_st == "aborted"
 
 
 def _remove_report_pdf_file(report_id: int) -> None:
@@ -4969,10 +5086,7 @@ def _start_export_purge_thread():
     t.start()
 
 
-_startup_session_power_audit()
-_register_clean_shutdown_signals()
-_register_clean_shutdown_atexit()
-_start_export_purge_thread()
+# Startup power audit runs after disso report helpers are defined (below).
 
 
 # =================== DISSOLUTION DUAL-ESP APIs ==========================
@@ -4980,7 +5094,60 @@ _start_export_purge_thread()
 
 def _disso_audit(action, details="", **extra):
     cur = data_service.get_current_user() or {}
-    _audit(cur.get("username"), cur.get("role"), action, details)
+    if cur.get("username"):
+        _audit(cur.get("username"), cur.get("role"), action, details)
+    else:
+        _audit("SYSTEM", "--", action, details)
+
+
+def _save_completion_report_from_power_checkpoint(cp: dict, *, finished_during_outage: bool = False):
+    """Save a completed (pending approval) report from a power-recovery checkpoint."""
+    run = dict(cp or {})
+    run["active"] = False
+    run["runStatus"] = "COMPLETE"
+    run["paused"] = False
+    run["completedAtRtc"] = run.get("completedAtRtc") or _utc_now_iso()
+    if finished_during_outage:
+        run["abortReason"] = None
+        td = dict(run.get("testData") or {})
+        td["remarks"] = "Test finished during power outage (remaining time elapsed before restore)"
+        td["status"] = "completed"
+        run["testData"] = td
+        run["remarks"] = td["remarks"]
+    try:
+        import disso_cmd_hardware as _cmd_hw
+        _cmd_hw.stop_test()
+    except Exception:
+        pass
+    report_id = _disso_save_report_from_run(run, aborted=False)
+    if finished_during_outage:
+        _audit(
+            "SYSTEM",
+            "--",
+            "Test finished during power outage",
+            "report id {}".format(report_id or "—"),
+        )
+    data_service.clear_test_run_data()
+    return report_id
+
+
+def _finalize_interrupted_run_checkpoint(cp: dict):
+    """Save report for FINALIZING checkpoint that crashed before lastReportId was set."""
+    aborted = bool(cp.get("abortReason")) or str(cp.get("runStatus") or "").upper() == "ABORTED"
+    run = dict(cp)
+    try:
+        rid = _disso_save_report_from_run(run, aborted=aborted)
+    except Exception:
+        app.logger.exception("Finalize FINALIZING checkpoint failed")
+        rid = None
+    data_service.clear_test_run_data()
+    _audit(
+        "SYSTEM",
+        "--",
+        "Test aborted" if aborted else "Test finished",
+        "finalizing recovery | report id {}".format(rid or "—"),
+    )
+    return rid
 
 
 def _disso_save_report_from_run(run: dict, aborted: bool = False):
@@ -5012,6 +5179,8 @@ def _disso_save_report_from_run(run: dict, aborted: bool = False):
             "testEndTime": run.get("completedAtRtc"),
         }
     )
+    if run.get("remarks") and not td.get("remarks"):
+        td["remarks"] = run.get("remarks")
     payload = {
         "type": "test",
         "recipe": recipe,
@@ -5022,6 +5191,8 @@ def _disso_save_report_from_run(run: dict, aborted: bool = False):
         "operatedByUsername": started.get("username"),
         "reportApprovalStatus": "pending",
     }
+    if run.get("remarks"):
+        payload["remarks"] = run.get("remarks")
     if aborted:
         payload["aborted"] = True
         payload["abortReason"] = run.get("abortReason") or "user_abort"
@@ -5051,6 +5222,11 @@ try:
     disso_test_service.set_callbacks(audit_fn=_disso_audit, save_report_fn=_disso_save_report_from_run)
 except Exception:
     app.logger.exception("Failed to bind disso_test_service callbacks")
+
+_startup_session_power_audit()
+_register_clean_shutdown_signals()
+_register_clean_shutdown_atexit()
+_start_export_purge_thread()
 
 
 @app.route("/api/disso/test/state", methods=["GET"])

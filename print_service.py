@@ -1421,6 +1421,20 @@ def _format_report_text(report_data: Dict[str, Any], width: int = A4_TEXT_WIDTH)
             ],
             width,
         )
+        trail = report_data.get("operatorTrail") or td.get("operatorTrail") or []
+        if isinstance(trail, list) and trail:
+            lines.append("Performed by:")
+            for op in trail:
+                if not isinstance(op, dict):
+                    continue
+                lines.append(
+                    "  - {} {} ({}) @ {}".format(
+                        op.get("action") or "?",
+                        op.get("name") or op.get("username") or "?",
+                        op.get("role") or "--",
+                        op.get("at") or "--",
+                    )
+                )
     if thermal:
         lines.extend([sep, ""])
         flat: list = []
@@ -1534,6 +1548,71 @@ def print_a4_report(report_data: Dict[str, Any], printer_port: Optional[str] = N
             _send_printer_init(ser)
             _send_text_to_a4(ser, text, baud)
             time.sleep(0.5)
+            return {"success": True, "port": port}
+        finally:
+            ser.close()
+    except Exception as e:
+        return {"success": False, "error": str(e), "port": port}
+
+
+def _format_interval_slip(snapshot: Dict[str, Any], width: int = A4_TEXT_WIDTH) -> str:
+    """Compact one-page status slip for periodic interval prints during a run."""
+    sep = "=" * width
+    dash = "-" * width
+    step = snapshot.get("step")
+    remaining = snapshot.get("remainingSec")
+    bath = snapshot.get("bathTemp")
+    rpm = snapshot.get("rpm")
+    status = snapshot.get("status") or "RUNNING"
+    rtc = snapshot.get("rtc") or snapshot.get("time") or ""
+    product = snapshot.get("productName") or ""
+    rem_txt = ""
+    if remaining is not None:
+        try:
+            sec = max(0, int(remaining))
+            m, s = divmod(sec, 60)
+            h, m = divmod(m, 60)
+            rem_txt = "{:02d}:{:02d}:{:02d}".format(h, m, s)
+        except (TypeError, ValueError):
+            rem_txt = str(remaining)
+    lines = [
+        sep,
+        "DISSOLUTION INTERVAL STATUS".center(width),
+        dash,
+        "Time: {}".format(rtc),
+        "Status: {}".format(status),
+    ]
+    if product:
+        lines.append("Product: {}".format(product))
+    lines.extend(
+        [
+            "Step: {}".format(step if step is not None else "—"),
+            "Remaining: {}".format(rem_txt or "—"),
+            "Bath Temp: {} °C".format(bath if bath is not None else "—"),
+            "RPM: {}".format(rpm if rpm is not None else "—"),
+            sep,
+        ]
+    )
+    return "\n".join(_wrap_lines(lines, width))
+
+
+def print_interval_a4(snapshot: Dict[str, Any], printer_port: Optional[str] = None) -> Dict[str, Any]:
+    """Print a compact A4 interval status slip. Does not raise; returns success/error."""
+    port = printer_port or _a4_port
+    baud = _a4_baud
+    if not serial:
+        return {"success": False, "error": "pyserial not installed", "port": port}
+    if not _port_exists(port):
+        return {"success": False, "error": f"A4 printer port not found: {port}", "port": port}
+    try:
+        text = _format_interval_slip(snapshot or {}).rstrip() + "\r\n\x0c"
+        ser = _open_a4_serial(port, baud)
+        try:
+            ser.reset_output_buffer()
+            ser.flush()
+            _send_printer_init(ser)
+            _send_text_to_a4(ser, text, baud)
+            time.sleep(0.3)
             return {"success": True, "port": port}
         finally:
             ser.close()

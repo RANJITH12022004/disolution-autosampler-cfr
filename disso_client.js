@@ -167,7 +167,7 @@
     var step = ((state.stepIndex || 0) + 1) + '/' + (state.stepCount || '?');
     var status = state.runStatus || 'RUNNING';
     msg.textContent = starter + ' started "' + product + '" (Step ' + step + '). Status: ' + status +
-      '. Continue the test or abort it. All operators are recorded on the report.';
+      '. The test may already be running in the background after power restore. Continue or Abort — all operators are recorded on the report (Performed by).';
     el.style.display = 'flex';
   }
 
@@ -309,6 +309,8 @@
 
   var _samplingOverlayPhase = null;
   var _runEndedApplied = false;
+  var _runEndedUiCleared = false;
+  var _reportOpenRetryTimer = null;
 
   function showSamplingOverlay(message) {
     if (typeof showLoadingOverlay === 'function') {
@@ -341,12 +343,10 @@
     }
   }
 
-  function applyDissolutionRunEndedFromServer(st) {
-    st = st || {};
-    if (_runEndedApplied) return;
-    _runEndedApplied = true;
+  function _clearEndedSessionUi(st) {
+    if (_runEndedUiCleared) return;
+    _runEndedUiCleared = true;
     hideSamplingOverlay();
-    stopStatePolling();
     disarmAutoTemp('test-ended');
     window._dissoServerRunActive = false;
     var dt = window._dissolutionTest;
@@ -362,15 +362,76 @@
       if (typeof _dtSetControlsIdle === 'function') _dtSetControlsIdle();
       if (typeof _dtSetPrimaryButton === 'function') _dtSetPrimaryButton('disabled');
       if (typeof _dtSetStatus === 'function') {
-        var aborted = String(st.runStatus || '').toUpperCase() === 'ABORTED';
+        var aborted = String((st && st.runStatus) || '').toUpperCase() === 'ABORTED';
         _dtSetStatus(aborted ? 'Test aborted' : 'Test completed', aborted ? 'aborted' : 'done');
       }
     }
     if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
-    var rid = st.lastReportId || st.reportId;
-    if (rid && typeof finishTestRunReportSaved === 'function') {
+  }
+
+  function _openPendingReportWhenReady(rid) {
+    if (_runEndedApplied) return;
+    if (!rid) return;
+    _runEndedApplied = true;
+    if (_reportOpenRetryTimer) {
+      clearTimeout(_reportOpenRetryTimer);
+      _reportOpenRetryTimer = null;
+    }
+    stopStatePolling();
+    if (typeof finishTestRunReportSaved === 'function') {
       try { finishTestRunReportSaved(rid); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _retryOpenPendingReport(attempt) {
+    attempt = attempt || 0;
+    if (_runEndedApplied) return;
+    api('/api/disso/test/state').then(function (res) {
+      var st = (res && res.body && res.body.state) || {};
+      var rid = st.lastReportId || st.reportId;
+      if (rid) {
+        _clearEndedSessionUi(st);
+        _openPendingReportWhenReady(rid);
+        return;
+      }
+      if (attempt < 24) {
+        _reportOpenRetryTimer = setTimeout(function () {
+          _retryOpenPendingReport(attempt + 1);
+        }, 250);
+      } else {
+        // Give up opening preview but still leave session cleared.
+        _runEndedApplied = true;
+        stopStatePolling();
+      }
+    }).catch(function () {
+      if (attempt < 24) {
+        _reportOpenRetryTimer = setTimeout(function () {
+          _retryOpenPendingReport(attempt + 1);
+        }, 250);
+      }
+    });
+  }
+
+  function applyDissolutionRunEndedFromServer(st) {
+    st = st || {};
+    if (_runEndedApplied) return;
+    var status = String(st.runStatus || '').toUpperCase();
+    // Still saving report on the server — keep polling; do not latch closed.
+    if (status === 'FINALIZING') {
+      return;
+    }
+    _clearEndedSessionUi(st);
+    var rid = st.lastReportId || st.reportId;
+    if (rid) {
+      _openPendingReportWhenReady(rid);
+      return;
+    }
+    if (status === 'COMPLETE' || status === 'ABORTED' || st.active === false) {
+      // COMPLETE arrived without id (race) — retry until lastReportId appears.
+      if (!_reportOpenRetryTimer) {
+        _retryOpenPendingReport(0);
+      }
     }
   }
 
@@ -381,8 +442,14 @@
     window._dissoServerState = st;
     if (st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING')) {
       _runEndedApplied = false;
+      _runEndedUiCleared = false;
     }
-    window._dissoServerRunActive = !!(st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING'));
+    window._dissoServerRunActive = !!(st.active && (
+      st.runStatus === 'RUNNING' ||
+      st.runStatus === 'PAUSED' ||
+      st.runStatus === 'POWER_RESUME_PENDING' ||
+      st.runStatus === 'FINALIZING'
+    ));
     var dt = window._dissolutionTest;
     if (dt && dt._aborting) {
       window._dissoServerRunActive = false;
@@ -396,8 +463,8 @@
       } else if (!(parseInt(dt.setSec, 10) > 0) && dt.steps && dt.steps[dt.stepIndex]) {
         dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || dt.setSec || 0;
       }
-      if (st.runStatus === 'RUNNING') {
-        dt.running = true;
+      if (st.runStatus === 'RUNNING' || st.runStatus === 'FINALIZING') {
+        dt.running = st.runStatus === 'RUNNING';
         dt.paused = false;
       } else if (st.runStatus === 'PAUSED') {
         dt.running = true;
@@ -433,6 +500,7 @@
         if (typeof _dtSetStatus === 'function') {
           if (rs === 'running') _dtSetStatus('Test running… Step ' + ((st.stepIndex || 0) + 1) + '/' + (st.stepCount || '?'), 'running');
           else if (rs === 'paused') _dtSetStatus('Test paused', 'paused');
+          else if (rs === 'finalizing') _dtSetStatus('Saving report…', 'running');
           else if (rs !== 'complete' && rs !== 'aborted') _dtSetStatus(st.runStatus, rs);
         }
       }
@@ -587,12 +655,25 @@
         hideSamplingOverlay();
         var tryEnd = function (attempt) {
           fetchStateNow().then(function (st) {
-            if (st && (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED')) {
+            var rs = st ? String(st.runStatus || '').toUpperCase() : '';
+            var rid = st && (st.lastReportId || st.reportId);
+            if (rs === 'FINALIZING') {
+              if (attempt < 24) {
+                setTimeout(function () { tryEnd(attempt + 1); }, 250);
+              }
+              return;
+            }
+            if ((rs === 'COMPLETE' || rs === 'ABORTED') && rid) {
               applyDissolutionRunEndedFromServer(st);
               return;
             }
-            if (attempt < 6) {
-              setTimeout(function () { tryEnd(attempt + 1); }, 300);
+            if (rs === 'COMPLETE' || rs === 'ABORTED') {
+              // COMPLETE without id — still trigger retry path inside helper.
+              applyDissolutionRunEndedFromServer(st || { runStatus: 'COMPLETE' });
+              return;
+            }
+            if (attempt < 24) {
+              setTimeout(function () { tryEnd(attempt + 1); }, 250);
             } else {
               applyDissolutionRunEndedFromServer({ runStatus: 'COMPLETE' });
             }

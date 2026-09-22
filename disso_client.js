@@ -422,6 +422,15 @@
       return;
     }
     _clearEndedSessionUi(st);
+    // Long beep once when the dissolution test completes successfully.
+    if (status === 'COMPLETE' && !window._dissoCompletionBeepPlayed) {
+      window._dissoCompletionBeepPlayed = true;
+      if (typeof window.kioskBeep === 'function') {
+        try { window.kioskBeep('long'); } catch (e) { /* ignore */ }
+      } else if (typeof window.dissoBeep === 'function') {
+        try { window.dissoBeep(2); } catch (e2) { /* ignore */ }
+      }
+    }
     var rid = st.lastReportId || st.reportId;
     if (rid) {
       _openPendingReportWhenReady(rid);
@@ -443,6 +452,7 @@
     if (st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING')) {
       _runEndedApplied = false;
       _runEndedUiCleared = false;
+      window._dissoCompletionBeepPlayed = false;
     }
     window._dissoServerRunActive = !!(st.active && (
       st.runStatus === 'RUNNING' ||

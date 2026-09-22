@@ -609,6 +609,46 @@ function isEditableTarget(el) {
     return t !== 'button' && t !== 'checkbox' && t !== 'radio' && t !== 'submit' && t !== 'reset';
 }
 
+/** Cached Test Settings beep switch (default on). */
+var _instrumentBeepEnabled = true;
+
+function setInstrumentBeepEnabled(settingsOrFlag) {
+    if (typeof settingsOrFlag === 'boolean') {
+        _instrumentBeepEnabled = settingsOrFlag;
+        return;
+    }
+    var s = settingsOrFlag || {};
+    var raw = String(s.beep != null ? s.beep : 'Enable').trim().toLowerCase();
+    _instrumentBeepEnabled = !(raw === 'disable' || raw === 'disabled' || raw === 'off' || raw === '0' || raw === 'false');
+}
+
+/**
+ * Audible feedback via master ESP buzzer.
+ * short → #BEEP* (~200 ms); long → #BEEP-2* (~2 s).
+ * No-op when Test Settings Beep is Disable.
+ */
+function kioskBeep(kind) {
+    if (!_instrumentBeepEnabled) return Promise.resolve({});
+    var long = String(kind || '').toLowerCase() === 'long';
+    var count = long ? 2 : 1;
+    if (typeof window.dissoBeep === 'function') {
+        return window.dissoBeep(count).catch(function () { return {}; });
+    }
+    return Promise.resolve({});
+}
+window.kioskBeep = kioskBeep;
+window.setInstrumentBeepEnabled = setInstrumentBeepEnabled;
+
+function refreshInstrumentBeepFromServer() {
+    return apiRequest(API_BASE + '/api/data/system-settings', { method: 'GET' }).then(function (result) {
+        var settings = (result && result.settings) ? result.settings : (result || {});
+        setInstrumentBeepEnabled(settings);
+        return settings;
+    }).catch(function () {
+        return null;
+    });
+}
+
 /**
  * Map backend / ESP protocol errors to commercial operator language.
  * Never show #frames*, ACK, or command names on the kiosk UI.
@@ -2300,6 +2340,13 @@ function completeSuccessfulLogin(user) {
     if (typeof refreshAuditUiAfterAuth === 'function') refreshAuditUiAfterAuth();
     showAppContainer();
     if (typeof refreshActiveQaCount === 'function') refreshActiveQaCount();
+    if (typeof refreshInstrumentBeepFromServer === 'function') {
+        refreshInstrumentBeepFromServer().finally(function () {
+            if (typeof kioskBeep === 'function') kioskBeep('short');
+        });
+    } else if (typeof kioskBeep === 'function') {
+        kioskBeep('short');
+    }
     var goHome = function () { goToPage('home'); };
     if (typeof window.dissoAfterLoginCheck === 'function') {
         window.dissoAfterLoginCheck().then(function (hasActive) {
@@ -3336,6 +3383,7 @@ function logout() {
         (window._reportApprovalGate && window._reportApprovalGate.reportId != null);
 
     var doLogout = function () {
+        if (typeof kioskBeep === 'function') kioskBeep('short');
         abortPendingReportOnLogout().then(function () {
             return stopActiveRunForLogout();
         }).then(function () {
@@ -9971,6 +10019,7 @@ function setSystemSettingsForm(settings) {
     syncTempToleranceFieldVisibility();
     syncPrintIntervalFieldVisibility();
     applyTempToleranceFromSettings(s);
+    setInstrumentBeepEnabled(s);
 }
 
 function collectSystemSettingsForm() {
@@ -12857,8 +12906,11 @@ function dissolutionPreheatStart() {
         if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
         if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
         _dtSetStatus('Preheat complete. Press Start to begin.', 'ready');
-        if (typeof window.dissoBeep === 'function') {
-            window.dissoBeep(1);
+        // Preheat done → Start ready: long beep (~2 s)
+        if (typeof kioskBeep === 'function') {
+            kioskBeep('long');
+        } else if (typeof window.dissoBeep === 'function') {
+            window.dissoBeep(2);
         }
         if (typeof logAuditEvent === 'function') {
             logAuditEvent('Preheat complete', 'Preheat reached set temperature', { eventType: 'lifecycle' });

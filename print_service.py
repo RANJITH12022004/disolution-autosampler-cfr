@@ -125,6 +125,11 @@ def check_printer_status(printer_type: str = "a4") -> Dict[str, Any]:
         return {"available": False, "error": str(e), "port": port}
 
 
+def a4_printer_connected() -> bool:
+    """Lightweight: True when configured A4 serial device node exists (printer attached)."""
+    return bool(_a4_port and _port_exists(_a4_port))
+
+
 def _open_a4_serial(port: str, baud: int):
     params = dict(
         port=port,
@@ -1099,7 +1104,34 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
 
     temp_log = []
     if isinstance(td, dict):
-        temp_log = td.get("tempLog") or report_data.get("tempLog") or []
+        # Prefer intervalLog (one row per print-interval tick). Continuous heartbeat samples
+        # are no longer written into reports.
+        has_pi_key = ("printIntervalSec" in td) or (
+            isinstance(report_data, dict) and "printIntervalSec" in report_data
+        )
+        try:
+            pi_sec = int(td.get("printIntervalSec") or report_data.get("printIntervalSec") or 0)
+        except (TypeError, ValueError):
+            pi_sec = 0
+        interval_log = td.get("intervalLog") or report_data.get("intervalLog") or []
+        if not isinstance(interval_log, list):
+            interval_log = []
+        legacy_temp = td.get("tempLog") or report_data.get("tempLog") or []
+        if not isinstance(legacy_temp, list):
+            legacy_temp = []
+        if pi_sec <= 0 and not interval_log:
+            # New runs stamp printIntervalSec=0 when disabled → omit TEST RESULTS.
+            # Legacy reports (no key) still render their stored tempLog.
+            if has_pi_key or not legacy_temp:
+                duration_sec = test_duration_seconds(td) if isinstance(td, dict) else None
+                status_raw = str(td.get("status", "")).lower() if isinstance(td, dict) else ""
+                done_label = "TEST ABORTED" if status_raw == "aborted" else "TEST COMPLETED"
+                dur_s = format_duration_hhmmss(duration_sec) if duration_sec is not None else "--"
+                lines.extend(["", done_label, "Total Test Duration: {}".format(dur_s)])
+                return
+            temp_log = legacy_temp
+        else:
+            temp_log = interval_log if interval_log else legacy_temp
     if not isinstance(temp_log, list):
         temp_log = []
 
@@ -1116,7 +1148,7 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
         for i, row in enumerate(temp_log):
             if not isinstance(row, dict):
                 continue
-            t = _fmt_report_time_only(row.get("time"))
+            t = _fmt_report_time_only(row.get("time") or row.get("rtc"))
             rpm = row.get("rpm")
             set_t = row.get("setTemp")
             bath = row.get("bathTemp")
@@ -1152,29 +1184,7 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
                     f"{i + 1:03d}     {t:>8}  {_cell_str(rpm):>5}  {set_s:>9}  {bath_s:>10}  {dev_s:>9}"
                 )
     else:
-        # Fallback: step results if no continuous log
-        results = td.get("stepResults") if isinstance(td, dict) else []
-        if isinstance(results, list) and results:
-            for i, r in enumerate(results):
-                if not isinstance(r, dict):
-                    continue
-                rpm = r.get("rpm")
-                set_t = td.get("temperature") if isinstance(td, dict) else None
-                if set_t is None:
-                    set_t = recipe.get("temperature")
-                try:
-                    set_s = "{:.1f}".format(float(set_t)) if set_t is not None else "--"
-                except (TypeError, ValueError):
-                    set_s = _cell_str(set_t)
-                status = r.get("status") or "--"
-                if thermal:
-                    lines.append(f"{i + 1:03d} {'--':>8} {_cell_str(rpm):>4} {set_s:>5} {'--':>5} {'--':>5}")
-                else:
-                    lines.append(
-                        f"{i + 1:03d}     {'--':>8}  {_cell_str(rpm):>5}  {set_s:>9}  {'--':>10}  {status:>9}"
-                    )
-        else:
-            lines.append("  (no temperature log recorded)")
+        lines.append("  (no interval log recorded)")
 
     if not thermal and dash:
         lines.append(dash)

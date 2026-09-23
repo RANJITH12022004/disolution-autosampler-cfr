@@ -10088,8 +10088,12 @@ function saveSystemSettings() {
     }
     if (payload.printInterval === 'Enable') {
         var piVal = payload.printIntervalValue;
-        if (piVal == null || isNaN(piVal) || piVal < 1) {
-            showAppModal('Please enter a print interval of 1 or greater.', 'Test Settings');
+        var piUnit = payload.printIntervalUnit === 'seconds' ? 'seconds' : 'minutes';
+        var piSec = (piVal != null && !isNaN(piVal))
+            ? (piUnit === 'seconds' ? Number(piVal) : Number(piVal) * 60)
+            : NaN;
+        if (piVal == null || isNaN(piVal) || isNaN(piSec) || piSec < 5 || piSec > (59 * 60)) {
+            showAppModal('Print interval must be between 5 seconds and 59 minutes.', 'Test Settings');
             return;
         }
     }
@@ -13883,7 +13887,8 @@ function _dtStartTicker() {
         // Only the left Step Timer counts down; Step Duration / Total Duration stay fixed.
         _dtSetText('dt-hero-timer', _dtFormatHms(_dissolutionTest.remainingSec));
         _dtUpdateProgress();
-        _dtAppendTempLogSample();
+        // Do not append per-second temp samples into the report — TEST RESULTS rows
+        // come only from print-interval ticks on the server (one line every N seconds).
         if (_dissolutionTest.remainingSec <= 0) _dtOnStepComplete();
     }, 1000);
 }
@@ -13991,6 +13996,8 @@ function _dtBuildCompletionReportPayload(opts) {
             steps: dt.steps,
             stepResults: stepResults,
             tempLog: tempLog,
+            intervalLog: Array.isArray(dt.intervalLog) ? dt.intervalLog.slice() : [],
+            printIntervalSec: parseInt(dt.printIntervalSec, 10) || 0,
             stepCount: dt.steps.length,
             completedSteps: completedSteps,
             durationSeconds: elapsed,

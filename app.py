@@ -2411,6 +2411,8 @@ def save_system_settings():
         saved = data_service.save_system_settings(settings)
         _audit(None, None, "Test settings changed", "")
         return jsonify({"success": True, "settings": saved}), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         app.logger.exception("Error saving system settings")
         return jsonify({"error": str(e)}), 500
@@ -5457,6 +5459,8 @@ def _disso_save_report_from_run(run: dict, aborted: bool = False):
             "arNumber": run.get("arNumber"),
             "batchNumber": run.get("batchNumber"),
             "tempLog": run.get("tempLog") or td.get("tempLog") or [],
+            "intervalLog": run.get("intervalLog") or td.get("intervalLog") or [],
+            "printIntervalSec": int(run.get("printIntervalSec") or td.get("printIntervalSec") or 0),
             "status": "aborted" if aborted else "completed",
             "abortReason": run.get("abortReason"),
             "operatorTrail": operators,

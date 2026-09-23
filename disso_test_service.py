@@ -264,7 +264,11 @@ def _arm_print_interval_locked() -> None:
         iv = int(data_service.get_print_interval_seconds() or 0)
     except Exception:
         iv = 0
+    # Bounds enforced in data_service (5s–59min); invalid → 0 (disabled).
     _run["printIntervalSec"] = max(0, iv)
+    td = _run.setdefault("testData", {})
+    if isinstance(td, dict):
+        td["printIntervalSec"] = _run["printIntervalSec"]
     if iv > 0:
         _run["nextPrintAtMono"] = time.monotonic() + float(iv)
     else:
@@ -276,8 +280,21 @@ def _clear_print_interval_locked() -> None:
     _run.pop("nextPrintAtMono", None)
 
 
+def _a4_printer_connected() -> bool:
+    """True only when A4 printer port device is present (no random print attempts)."""
+    if print_service is None:
+        return False
+    try:
+        if hasattr(print_service, "a4_printer_connected"):
+            return bool(print_service.a4_printer_connected())
+        st = print_service.check_printer_status("a4")
+        return bool(isinstance(st, dict) and st.get("available"))
+    except Exception:
+        return False
+
+
 def _build_interval_snapshot_locked() -> Dict[str, Any]:
-    """Caller must hold _lock. Deterministic RUNNING snapshot for A4 + log."""
+    """Caller must hold _lock. Deterministic RUNNING snapshot for A4 + one PDF log line."""
     recipe = _run.get("recipe") or {}
     step_idx = int(_run.get("stepIndex") or 0)
     steps = _run.get("remainingStepsPayload")
@@ -293,6 +310,15 @@ def _build_interval_snapshot_locked() -> Dict[str, Any]:
             bath = round(float(live.get("bath")), 2)
     except Exception:
         bath = None
+    set_temp = None
+    try:
+        if recipe.get("temperature") is not None:
+            set_temp = round(float(recipe.get("temperature")), 2)
+    except (TypeError, ValueError):
+        set_temp = None
+    deviation = None
+    if bath is not None and set_temp is not None:
+        deviation = round(bath - set_temp, 2)
     product = recipe.get("productName") or recipe.get("name") or ""
     return {
         "time": _now_iso(),
@@ -301,6 +327,8 @@ def _build_interval_snapshot_locked() -> Dict[str, Any]:
         "step": step_idx + 1,
         "remainingSec": int(_run.get("remainingSecInStep") or 0),
         "bathTemp": bath,
+        "setTemp": set_temp,
+        "deviation": deviation,
         "rpm": rpm,
         "status": str(_run.get("runStatus") or "RUNNING"),
         "productName": product,
@@ -308,27 +336,28 @@ def _build_interval_snapshot_locked() -> Dict[str, Any]:
 
 
 def _append_interval_log_locked(row: Dict[str, Any]) -> None:
-    """Caller must hold _lock."""
+    """Caller must hold _lock. Exactly one report/PDF log line per interval tick."""
     log = _run.setdefault("intervalLog", [])
     if not isinstance(log, list):
         log = []
         _run["intervalLog"] = log
-    log.append(dict(row))
+    entry = {
+        "time": row.get("time") or row.get("rtc") or _now_iso(),
+        "rpm": row.get("rpm"),
+        "setTemp": row.get("setTemp"),
+        "bathTemp": row.get("bathTemp"),
+        "deviation": row.get("deviation"),
+        "kind": "intervalPrint",
+    }
+    log.append(entry)
     while len(log) > _INTERVAL_LOG_MAX:
         log.pop(0)
     td = _run.setdefault("testData", {})
     if isinstance(td, dict):
         td["intervalLog"] = list(log)
-    # Mirror into tempLog so reports that only read tempLog still see the row.
-    tlog = _run.setdefault("tempLog", [])
-    if not isinstance(tlog, list):
-        tlog = []
-        _run["tempLog"] = tlog
-    tlog.append(dict(row))
-    while len(tlog) > _TEMP_LOG_MAX:
-        tlog.pop(0)
-    if isinstance(td, dict):
-        td["tempLog"] = list(tlog)
+        # Keep tempLog identical to intervalLog for report consumers that only read tempLog.
+        td["tempLog"] = list(log)
+    _run["tempLog"] = list(log)
 
 
 def _emit_interval_print_async(snap: Dict[str, Any]) -> None:
@@ -362,9 +391,10 @@ def _emit_interval_print_async(snap: Dict[str, Any]) -> None:
 
 
 def _maybe_interval_print() -> None:
-    """If RUNNING and interval due, log snapshot and queue A4 slip (non-blocking)."""
+    """If RUNNING and interval due: one log line; print only if A4 printer is connected."""
     global _interval_print_busy
     snap = None
+    do_print = False
     with _lock:
         if not _run.get("active") or _run.get("runStatus") != "RUNNING":
             return
@@ -378,16 +408,19 @@ def _maybe_interval_print() -> None:
             return
         if now < float(next_at):
             return
-        # Advance schedule; skip catch-up bursts — one slip per due tick.
+        # Advance schedule; skip catch-up bursts — one slip / one log line per due tick.
         nxt = float(next_at) + float(interval_sec)
         while nxt <= now:
             nxt += float(interval_sec)
         _run["nextPrintAtMono"] = nxt
         snap = _build_interval_snapshot_locked()
         _append_interval_log_locked(snap)
-        if _interval_print_busy:
-            snap = None  # logged; skip overlapping printer jobs
-    if snap:
+        # Print only when printer is connected and previous job finished (never random/queue spam).
+        if not _interval_print_busy and _a4_printer_connected():
+            do_print = True
+        else:
+            snap = None
+    if do_print and snap:
         _emit_interval_print_async(snap)
 
 
@@ -535,8 +568,7 @@ def _heartbeat_loop():
                 _complete(aborted=False, reason="end_test_timeout")
                 continue
 
-            if active and status in ("RUNNING", "PAUSED"):
-                _append_temp_log_sample()
+            # Report TEST RESULTS rows come only from print-interval ticks (not every heartbeat).
             if active and status == "RUNNING":
                 _maybe_interval_print()
             if active and status in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING", "FINALIZING"):
@@ -676,6 +708,7 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
                 "remainingStepsPayload": steps,
                 "tempLog": [],
                 "intervalLog": [],
+                "printIntervalSec": 0,
                 "testData": {
                     "productName": recipe.get("productName") or recipe.get("name"),
                     "powerFailure": pf,
@@ -684,6 +717,7 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
                     "batchNumber": meta.get("batchNumber") or recipe.get("batchNumber"),
                     "tempLog": [],
                     "intervalLog": [],
+                    "printIntervalSec": 0,
                 },
             }
         )

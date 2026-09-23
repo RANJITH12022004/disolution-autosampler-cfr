@@ -1158,6 +1158,11 @@ def _normalize_temp_tolerance_value(value: Any, enabled: bool) -> Any:
     return round(num, 2)
 
 
+# Print interval bounds: minimum 5 seconds, maximum 59 minutes.
+PRINT_INTERVAL_MIN_SEC = 5
+PRINT_INTERVAL_MAX_SEC = 59 * 60  # 3540
+
+
 def _normalize_print_interval_unit(value: Any) -> str:
     text = str(value or "minutes").strip().lower()
     if text in ("second", "seconds", "sec", "s"):
@@ -1165,7 +1170,24 @@ def _normalize_print_interval_unit(value: Any) -> str:
     return "minutes"
 
 
-def _normalize_print_interval_value(value: Any, enabled: bool) -> Any:
+def _print_interval_to_seconds(value: Any, unit: Any) -> Optional[int]:
+    """Convert value+unit to seconds, or None if invalid / out of bounds."""
+    if value is None or value == "":
+        return None
+    try:
+        num = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    if num < 1:
+        return None
+    u = _normalize_print_interval_unit(unit)
+    sec = int(num) if u == "seconds" else int(num) * 60
+    if sec < PRINT_INTERVAL_MIN_SEC or sec > PRINT_INTERVAL_MAX_SEC:
+        return None
+    return sec
+
+
+def _normalize_print_interval_value(value: Any, enabled: bool, unit: Any = "minutes") -> Any:
     if not enabled:
         return None
     if value is None or value == "":
@@ -1176,19 +1198,19 @@ def _normalize_print_interval_value(value: Any, enabled: bool) -> Any:
         return None
     if num < 1:
         return None
+    if _print_interval_to_seconds(num, unit) is None:
+        return None
     return num
 
 
 def get_print_interval_seconds(settings: Optional[Dict[str, Any]] = None) -> int:
-    """Return interval seconds for live A4 slips, or 0 if disabled."""
+    """Return interval seconds for live A4 slips, or 0 if disabled / out of bounds."""
     s = settings if isinstance(settings, dict) else get_system_settings()
     if _normalize_enable_disable(s.get("printInterval"), "Disable") != "Enable":
         return 0
-    val = _normalize_print_interval_value(s.get("printIntervalValue"), True)
-    if not val:
-        return 0
     unit = _normalize_print_interval_unit(s.get("printIntervalUnit"))
-    return int(val) if unit == "seconds" else int(val) * 60
+    sec = _print_interval_to_seconds(s.get("printIntervalValue"), unit)
+    return int(sec) if sec else 0
 
 
 def get_system_settings() -> Dict[str, Any]:
@@ -1213,7 +1235,9 @@ def get_system_settings() -> Dict[str, Any]:
     print_enabled = settings.get("printInterval") == "Enable"
     settings["printIntervalUnit"] = _normalize_print_interval_unit(settings.get("printIntervalUnit"))
     settings["printIntervalValue"] = _normalize_print_interval_value(
-        settings.get("printIntervalValue"), print_enabled
+        settings.get("printIntervalValue"),
+        print_enabled,
+        settings.get("printIntervalUnit"),
     )
 
     return settings
@@ -1237,8 +1261,20 @@ def save_system_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     )
     print_enabled = merged.get("printInterval") == "Enable"
     merged["printIntervalUnit"] = _normalize_print_interval_unit(merged.get("printIntervalUnit"))
+    if print_enabled:
+        raw_val = merged.get("printIntervalValue")
+        if raw_val is None or raw_val == "":
+            raise ValueError(
+                "Print interval must be between 5 seconds and 59 minutes."
+            )
+        if _print_interval_to_seconds(raw_val, merged.get("printIntervalUnit")) is None:
+            raise ValueError(
+                "Print interval must be between 5 seconds and 59 minutes."
+            )
     merged["printIntervalValue"] = _normalize_print_interval_value(
-        merged.get("printIntervalValue"), print_enabled
+        merged.get("printIntervalValue"),
+        print_enabled,
+        merged.get("printIntervalUnit"),
     )
 
     path = _get_storage_path("systemSettings.json")

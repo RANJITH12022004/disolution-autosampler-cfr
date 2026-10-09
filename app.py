@@ -2409,7 +2409,7 @@ def save_system_settings():
             return gate
         settings = request.get_json(force=True, silent=True) or {}
         saved = data_service.save_system_settings(settings)
-        _audit(None, None, "Test settings changed", "")
+        _audit(None, None, "Test settings saved", "Instrument test settings updated")
         return jsonify({"success": True, "settings": saved}), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -4164,7 +4164,10 @@ def get_report_preview(report_id):
             detail = "{} | {}".format(detail, rname)
         if rtype and rtype != "report":
             detail = "{} | {}".format(detail, rtype)
-        _audit(None, None, "Report opened", detail)
+        # Approval-lock poll and silent PDF helpers pass audit=0 to avoid spam.
+        audit_flag = str(request.args.get("audit", "1")).strip().lower()
+        if audit_flag not in ("0", "false", "no", "off"):
+            _audit(None, None, "Report opened", detail)
         preview_data = report_service.get_report_preview_data(report)
         return jsonify({"preview": preview_data}), 200
     except Exception as e:
@@ -4273,7 +4276,12 @@ def save_report_pdf(report_id):
                 "success": False,
                 "error": "PDF is available only after the report is approved or marked aborted.",
             }), 403
-        if not _generate_report_pdf_file(report_id, write_audit=True):
+        body = request.get_json(force=True, silent=True) or {}
+        # Silent regenerations (client post-approve refresh) must not re-audit.
+        write_audit = True
+        if str(body.get("audit", "1")).strip().lower() in ("0", "false", "no", "off"):
+            write_audit = False
+        if not _generate_report_pdf_file(report_id, write_audit=write_audit):
             return jsonify({"success": False, "error": "PDF generation failed"}), 500
         out_path = _report_pdf_path(report_id)
         return jsonify({"success": True, "path": str(out_path), "size_bytes": out_path.stat().st_size}), 200
@@ -5530,9 +5538,33 @@ def disso_test_state():
                 st = disso_test_service.get_state(public=True)
                 return jsonify({"ok": True, "state": st}), 200
         st = disso_test_service.get_state(public=public)
+        try:
+            st["preheatReady"] = disso_cmd_hardware.is_preheat_ready()
+        except Exception:
+            st["preheatReady"] = False
         return jsonify({"ok": True, "state": st}), 200
     except Exception as e:
         app.logger.exception("disso test state")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/disso/test/prepare", methods=["POST"])
+def disso_test_prepare():
+    """Stop orphan ESP runs and clear stale session before Quick Test / Load Recipe."""
+    try:
+        gate = _require_auth()
+        if gate:
+            return gate
+        gate = _require_any_session_internal(
+            ["quick-test", "recipe-test"],
+            "Forbidden. You do not have permission to run tests.",
+        )
+        if gate:
+            return gate
+        result = disso_test_service.prepare_new_session()
+        return jsonify(result), 200 if result.get("ok") else 409
+    except Exception as e:
+        app.logger.exception("disso test prepare")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 

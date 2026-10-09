@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=96">
+    <link rel="stylesheet" href="styles.css?v=103">
 </head>
 
 <body>
@@ -260,18 +260,6 @@
                             <p>Return to the active dissolution test</p>
                         </div>
 
-                        <div class="test-card test-card-create" onclick="manageRecipes()" style="cursor: pointer;" data-rbac-nav="recipe-manage">
-                            <div class="test-icon">
-                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                                </svg>
-                            </div>
-                            <h2>Manage Recipe</h2>
-                            <p>Create, edit, and manage dissolution recipes</p>
-                        </div>
-
                         <div class="test-card test-card-load" onclick="startRecipeTest()" style="cursor: pointer;">
                             <div class="test-icon">
                                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -353,12 +341,17 @@
                             </div>
                             <div class="form-group">
                                 <label for="quick-media-volume">Media Volume</label>
-                                <input type="text" id="quick-media-volume" class="input-field"
+                                <input type="number" id="quick-media-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                    placeholder="e.g. 900.0"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
                                 <label for="quick-media-ph">Media pH</label>
-                                <input type="number" id="quick-media-ph" class="input-field" min="0" max="14" step="0.01"
+                                <input type="text" id="quick-media-ph" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" data-osk-prompt="Media pH"
+                                    placeholder="e.g. 5.5"
+                                    autocomplete="off"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
@@ -373,7 +366,9 @@
                             </div>
                             <div class="form-group">
                                 <label for="quick-rinse-volume">Flush Volume</label>
-                                <input type="text" id="quick-rinse-volume" class="input-field"
+                                <input type="number" id="quick-rinse-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                    placeholder="0 if none"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
@@ -400,9 +395,19 @@
                         </div>
                         <div id="quick-create-recipe-steps-list" class="dissolution-steps-list"></div>
 
+
+                        <details class="quick-test-uart-panel" id="quick-test-uart-panel" open>
+                            <summary class="section-subtitle" style="cursor:pointer;margin-top:20px;">UART command log (ESP / UART-1)</summary>
+                            <p class="section-subtitle" style="margin:8px 0;font-size:0.9rem;">Live tail while you are on Quick Test or a Quick Test run. Requires Quick Test permission.</p>
+                            <pre id="quick-test-uart-log" class="uart-log-view" aria-live="polite">Loading UART log…</pre>
+                            <div class="members-actions-row" style="margin-top:8px;">
+                                <button type="button" class="btn btn-secondary" onclick="refreshQuickTestUartLog(false)">Refresh</button>
+                                <button type="button" class="btn btn-secondary" onclick="refreshQuickTestUartLog(true)">Clear log &amp; refresh</button>
+                            </div>
+                        </details>
+
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" onclick="startQuickTestRunFromParams()">Start Test</button>
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back to Home</button>
                         </div>
                     </div>
                 </div>
@@ -410,6 +415,11 @@
                 <div class="page" id="page-test-run">
                     <div class="dt-run">
                         <p class="dt-status-msg" id="dt-status-msg" hidden>Press Preheat to begin.</p>
+                            <div id="test-run-uart-wrap" class="quick-test-uart-panel" style="display:none;margin-top:12px;">
+                                <div class="section-subtitle" style="font-weight:600;">UART command log (Quick Test)</div>
+                                <pre id="test-run-uart-log" class="uart-log-view" aria-live="polite">Loading UART log…</pre>
+                            </div>
+
 
                         <div class="dt-content">
 
@@ -517,7 +527,7 @@
                                             <div class="dt-shortcut-name">Vessels</div>
                                             <div class="dt-shortcut-arrow">›</div>
                                         </button>
-                                        <button type="button" class="dt-shortcut" id="dt-shaft-info-btn" onclick="openShaftPositionPage()" title="Shaft position" aria-label="Shaft position">
+                                        <button type="button" class="dt-shortcut" id="dt-shaft-info-btn" onclick="openShaftPositionPage()" title="Stirrer Unit Controls" aria-label="Stirrer Unit Controls">
                                             <div class="dt-shortcut-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v10"/><path d="M8 13h8"/><path d="M5 16a7 7 0 0 0 14 0"/><path d="M12 16v5"/></svg></div>
                                             <div class="dt-shortcut-name">Shaft</div>
                                             <div class="dt-shortcut-arrow">›</div>
@@ -564,17 +574,16 @@
                     <div class="sp-page">
                         <header class="sp-toolbar">
                             <div class="sp-title-block">
-                                <h2 class="sp-page-title">Shaft Position</h2>
-                                <p class="sp-page-sub">Raise, lower, or stop the shaft</p>
+                                <h2 class="sp-page-title">Stirrer Unit Controls</h2>
+                                <p class="sp-page-sub">Raise, lower, or stop the stirrer unit</p>
                             </div>
-                            <button type="button" class="btn btn-secondary sp-back-btn" onclick="closeShaftPositionPage()">Back</button>
                         </header>
                         <div class="sp-status-card" aria-live="polite">
                             <span class="sp-status-key">Status</span>
                             <strong class="sp-status-val" id="dt-stirrer-status">Stopped</strong>
                         </div>
-                        <div class="sp-controls" role="group" aria-label="Shaft controls">
-                            <button type="button" class="sp-card sp-btn-up dt-stirrer-up" id="dt-stirrer-up" onclick="stirrerUnitCommand('up')" aria-label="Shaft up">
+                        <div class="sp-controls" role="group" aria-label="Stirrer Unit Controls">
+                            <button type="button" class="sp-card sp-btn-up dt-stirrer-up" id="dt-stirrer-up" onclick="stirrerUnitCommand('up')" aria-label="Stirrer unit up">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M32 52V14"/>
@@ -583,7 +592,7 @@
                                 </span>
                                 <span class="sp-card-label">Up</span>
                             </button>
-                            <button type="button" class="sp-card sp-btn-stop dt-stirrer-stop is-active" id="dt-stirrer-stop" onclick="stirrerUnitCommand('stop')" aria-label="Shaft stop">
+                            <button type="button" class="sp-card sp-btn-stop dt-stirrer-stop is-active" id="dt-stirrer-stop" onclick="stirrerUnitCommand('stop')" aria-label="Stirrer unit stop">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="currentColor">
                                         <rect x="16" y="16" width="32" height="32" rx="4"/>
@@ -591,7 +600,7 @@
                                 </span>
                                 <span class="sp-card-label">Stop</span>
                             </button>
-                            <button type="button" class="sp-card sp-btn-down dt-stirrer-down" id="dt-stirrer-down" onclick="stirrerUnitCommand('down')" aria-label="Shaft down">
+                            <button type="button" class="sp-card sp-btn-down dt-stirrer-down" id="dt-stirrer-down" onclick="stirrerUnitCommand('down')" aria-label="Stirrer unit down">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M32 12v38"/>
@@ -724,12 +733,17 @@
                             </div>
                             <div class="form-group">
                                 <label for="recipe-media-volume">Media Volume</label>
-                                <input type="text" id="recipe-media-volume" class="input-field"
+                                <input type="number" id="recipe-media-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                    placeholder="e.g. 900.0"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
                                 <label for="recipe-media-ph">Media PH</label>
-                                <input type="number" id="recipe-media-ph" class="input-field" min="0" max="14" step="0.01"
+                                <input type="text" id="recipe-media-ph" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" data-osk-prompt="Media pH"
+                                    placeholder="e.g. 5.5"
+                                    autocomplete="off"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
@@ -744,7 +758,9 @@
                             </div>
                             <div class="form-group">
                                 <label for="recipe-rinse-volume">Flush Volume</label>
-                                <input type="text" id="recipe-rinse-volume" class="input-field"
+                                <input type="number" id="recipe-rinse-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                    placeholder="0 if none"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
                             <div class="form-group">
@@ -762,12 +778,11 @@
                         </div>
 
                         <p class="section-subtitle" id="create-recipe-steps-summary" style="margin-top: 16px;">
-                            After you continue, configure RPM, duration, and sample volume for each step.
+                            After you continue, configure RPM and duration for each step. Sample and flush volumes above apply to the whole recipe.
                         </p>
 
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" onclick="continueCreateRecipeToSteps()">Continue</button>
-                            <button type="button" class="btn btn-secondary" onclick="backFromCreateRecipeStep1()">Back</button>
                         </div>
                     </div>
                 </div>
@@ -776,19 +791,17 @@
                     <div class="add-member-container dissolution-create-recipe dissolution-create-recipe-step2" style="max-width: 960px; margin: 0 auto;">
                         <h2 class="section-title" id="create-recipe-step2-title">Configure Steps</h2>
                         <p class="section-subtitle" id="create-recipe-step2-summary">
-                            Temperature applies to every step. Enter RPM, duration (min 00:04:00), and sample volume for each step.
+                            Temperature, sample volume, and flush volume apply to every step. Enter RPM and duration (min 00:04:00) for each step below.
                         </p>
-                        <div class="dissolution-steps-header dissolution-steps-header--4col">
+                        <div class="dissolution-steps-header">
                             <span>Step</span>
                             <span>RPM</span>
                             <span>Duration (HH:MM:SS)</span>
-                            <span>Sample Volume</span>
                         </div>
-                        <div id="create-recipe-steps-list" class="dissolution-steps-list dissolution-steps-list--4col"></div>
+                        <div id="create-recipe-steps-list" class="dissolution-steps-list"></div>
 
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" onclick="saveDissolutionRecipe()">Save Recipe</button>
-                            <button type="button" class="btn btn-secondary" onclick="backFromCreateRecipeSteps()">Back</button>
                         </div>
                     </div>
                 </div>
@@ -895,9 +908,6 @@
                                 </thead>
                                 <tbody id="disable-recipes-table-body"></tbody>
                             </table>
-                        </div>
-                        <div class="validation-actions-row">
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('settings')">Back</button>
                         </div>
                     </div>
                 </div>
@@ -1035,9 +1045,6 @@
                                 <h3>Audit Trails</h3>
                                 <p>Export filtered audit trail entries</p>
                             </button>
-                        </div>
-                        <div class="validation-actions-row" style="margin-top: 32px;">
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('reports')">Back to Reports</button>
                         </div>
                     </div>
                 </div>
@@ -1313,7 +1320,6 @@
                 <div class="page" id="page-temperature-validation-result" style="display: none;">
                     <div class="add-member-container" style="max-width: 640px; margin: 0 auto;">
                         <p class="section-subtitle">Temperature validation continues in the suite flow.</p>
-                        <button type="button" class="btn btn-secondary" onclick="goToPage('validate-type-select')">Back</button>
                     </div>
                 </div>
 
@@ -1340,7 +1346,7 @@
                                 <div class="rpm-val-timer-hint" id="rpm-val-timer-hint">Press Start Validation to begin</div>
                             </section>
                         </div>
-                        <section class="rpm-val-shaft-compact" aria-label="Shaft position">
+                        <section class="rpm-val-shaft-compact" aria-label="Stirrer Unit Controls">
                             <div class="rpm-val-shaft-head">
                                 <span class="rpm-val-section-label">Shaft position</span>
                                 <div class="rpm-val-shaft-status">Status: <strong id="rpm-val-shaft-status">Stopped</strong></div>
@@ -1399,8 +1405,6 @@
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
                             <button type="button" class="btn btn-primary" id="rpm-val-open-report-btn"
                                 onclick="openRpmValidationReport()">Open Validation Report</button>
-                            <button type="button" class="btn btn-secondary"
-                                onclick="goToPage('rpm-validation')">Back to Validation</button>
                         </div>
                     </div>
                 </div>
@@ -1737,7 +1741,6 @@
                             <div class="temp-cal-actions">
                                 <button type="button" class="btn btn-primary" id="temp-cal-btn" onclick="onTemperatureCalibrationPrimary()">Start</button>
                                 <button type="button" class="btn btn-secondary" id="temp-cal-abort-btn" style="display:none;" onclick="abortTemperatureCalibrationHold()">Abort</button>
-                                <button type="button" class="btn btn-secondary" onclick="goToPage('validate')">Back</button>
                             </div>
                         </div>
                     </div>
@@ -1747,9 +1750,6 @@
                     <div class="add-member-container" style="max-width: 640px; margin: 0 auto;">
                         <h2 class="section-title">Validation</h2>
                         <p class="section-subtitle">This screen is unavailable for Dissolution Tester.</p>
-                        <div class="add-member-actions members-actions-row" style="margin-top: 16px;">
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('home')">Back</button>
-                        </div>
                     </div>
                 </div>
 
@@ -1801,8 +1801,6 @@
                                 <p>4. Place 5 kg calibration weight on the plate.</p>
                                 <p>5. Press Start Calibration to complete.</p>
                             </div>
-                            <button type="button" class="btn btn-primary validation-action-btn"
-                                onclick="goToPage('calibration-type-select')">Back</button>
                             <div class="validation-card">
                                 <div class="validation-card-label">Status</div>
                                 <span class="validation-card-value" id="load-calibration-status">Ready</span>
@@ -1823,8 +1821,6 @@
                                 <p>3. Place 10 mm gauge block</p>
                                 <p>4. Press "Calibrate"</p>
                             </div>
-                            <button type="button" class="btn btn-primary validation-action-btn"
-                                onclick="goToPage('calibration-type-select')">Back</button>
                             <div class="validation-card">
                                 <div class="validation-card-label">Status</div>
                                 <span class="validation-card-value" id="distance-zero-calibration-status">Ready</span>
@@ -1891,17 +1887,14 @@
                                 </div>
                                 <input type="hidden" id="sys-print-interval" value="Disable">
                                 <div class="system-settings-tolerance-value-wrap" id="sys-print-interval-value-wrap" hidden>
-                                    <label for="sys-print-interval-value">Every</label>
-                                    <input type="text" id="sys-print-interval-value" class="input-field sys-set-tol-input"
-                                        inputmode="numeric" placeholder="5–59 min / 5–3540 s"
-                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
-                                    <div class="sys-set-seg" role="group" aria-label="Print interval unit">
-                                        <button type="button" class="sys-set-seg-btn is-selected" id="sys-print-interval-unit-minutes"
-                                            data-group="printIntervalUnit" data-value="minutes" onclick="selectSystemSettingCard(this)">Minutes</button>
-                                        <button type="button" class="sys-set-seg-btn" id="sys-print-interval-unit-seconds"
-                                            data-group="printIntervalUnit" data-value="seconds" onclick="selectSystemSettingCard(this)">Seconds</button>
-                                    </div>
-                                    <input type="hidden" id="sys-print-interval-unit" value="minutes">
+                                    <label for="sys-print-interval-value">Interval (MM:SS)</label>
+                                    <input type="text" id="sys-print-interval-value" class="input-field sys-set-tol-input sys-set-mmss-input"
+                                        inputmode="numeric" maxlength="5" placeholder="MM:SS"
+                                        title="Minimum 00:05, maximum 59:00"
+                                        onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)"
+                                        onblur="if(typeof normalizePrintIntervalMmSsInput === 'function') normalizePrintIntervalMmSsInput(this)">
+                                    <span class="sys-set-mmss-hint">00:05 – 59:00</span>
+                                    <input type="hidden" id="sys-print-interval-unit" value="seconds">
                                 </div>
                             </section>
                         </div>
@@ -1978,8 +1971,6 @@
                             <div class="wakeup-actions">
                                 <button type="button" class="btn btn-primary" id="wakeup-save-btn"
                                     onclick="saveWakeupSchedule()">Save</button>
-                                <button type="button" class="btn btn-secondary"
-                                    onclick="goToPage('settings')">Back</button>
                             </div>
                         </div>
                     </div>
@@ -2118,7 +2109,7 @@
                                     <path d="M5 12l7-7 7 7"></path>
                                 </svg>
                             </div>
-                            <h3>Shaft Controls</h3>
+                            <h3>Stirrer Unit Controls</h3>
                         </button>
                         <button class="settings-card settings-cleaning" onclick="goToPage('cleaning-cycle')">
                             <div class="settings-icon">
@@ -2152,9 +2143,6 @@
                 <div class="page" id="page-ip-config-result">
                     <div class="page-content ip-config-result-page">
                         <p class="ip-config-result-instructions">Use Refresh on IP Config to view addresses.</p>
-                        <div class="button-group" style="margin-top: 32px;">
-                            <button type="button" class="btn btn-secondary" onclick="goToPage('ip-config')">Back</button>
-                        </div>
                     </div>
                 </div>
 
@@ -2214,29 +2202,26 @@
                             <div class="heater-ctrl-actions">
                                 <button type="button" class="btn btn-primary" id="heater-ctrl-apply-btn"
                                     onclick="applyHeaterControlTemp()">Apply Temp</button>
-                                <button type="button" class="btn btn-secondary"
-                                    onclick="goToPage('settings')">Back</button>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Shaft controls (Settings) — same UX as test Shaft Position -->
+                <!-- Stirrer Unit Controls (Settings) — same UX as test stirrer page -->
                 <div class="page" id="page-shaft-control">
                     <div class="sp-page settings-shaft-page">
                         <header class="sp-toolbar">
                             <div class="sp-title-block">
-                                <h2 class="sp-page-title">Shaft Controls</h2>
-                                <p class="sp-page-sub">Raise, lower, or stop the shaft</p>
+                                <h2 class="sp-page-title">Stirrer Unit Controls</h2>
+                                <p class="sp-page-sub">Raise, lower, or stop the stirrer unit</p>
                             </div>
-                            <button type="button" class="btn btn-secondary sp-back-btn" onclick="goToPage('settings')">Back</button>
                         </header>
                         <div class="sp-status-card" aria-live="polite">
                             <span class="sp-status-key">Status</span>
                             <strong class="sp-status-val" id="settings-shaft-status">Stopped</strong>
                         </div>
-                        <div class="sp-controls" role="group" aria-label="Shaft controls">
-                            <button type="button" class="sp-card sp-btn-up" id="settings-shaft-up" onclick="settingsShaftCommand('up')" aria-label="Shaft up">
+                        <div class="sp-controls" role="group" aria-label="Stirrer Unit Controls">
+                            <button type="button" class="sp-card sp-btn-up" id="settings-shaft-up" onclick="settingsShaftCommand('up')" aria-label="Stirrer unit up">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M32 52V14"/>
@@ -2245,7 +2230,7 @@
                                 </span>
                                 <span class="sp-card-label">Up</span>
                             </button>
-                            <button type="button" class="sp-card sp-btn-stop is-active" id="settings-shaft-stop" onclick="settingsShaftCommand('stop')" aria-label="Shaft stop">
+                            <button type="button" class="sp-card sp-btn-stop is-active" id="settings-shaft-stop" onclick="settingsShaftCommand('stop')" aria-label="Stirrer unit stop">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="currentColor">
                                         <rect x="16" y="16" width="32" height="32" rx="4"/>
@@ -2253,7 +2238,7 @@
                                 </span>
                                 <span class="sp-card-label">Stop</span>
                             </button>
-                            <button type="button" class="sp-card sp-btn-down" id="settings-shaft-down" onclick="settingsShaftCommand('down')" aria-label="Shaft down">
+                            <button type="button" class="sp-card sp-btn-down" id="settings-shaft-down" onclick="settingsShaftCommand('down')" aria-label="Stirrer unit down">
                                 <span class="sp-card-icon" aria-hidden="true">
                                     <svg viewBox="0 0 64 64" width="72" height="72" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M32 12v38"/>
@@ -2643,7 +2628,6 @@
                         </button>
                         <div class="add-member-actions members-actions-row">
                             <button class="btn btn-secondary" onclick="skipMemberBiometricEnrollment()">Skip for Now</button>
-                            <button class="btn btn-secondary" onclick="backToMemberAfterBiometric()">Back to Members</button>
                         </div>
                     </div>
                 </div>
@@ -2799,12 +2783,12 @@
         </main>
     </div>
     <div id="keyboard-root"></div>
-    <script src="keyboard.js?v=3"></script>
+    <script src="keyboard.js?v=5"></script>
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=9"></script>
-    <script src="disso_client.js?v=17"></script>
-    <script src="script.js?v=121"></script>
+    <script src="disso_client.js?v=20"></script>
+    <script src="script.js?v=130"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

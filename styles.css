@@ -849,16 +849,19 @@ body {
 .sys-set-copy { min-width: 0; flex: 1 1 auto; }
 .sys-set-section-title {
     margin: 0;
-    font-size: 15px;
-    font-weight: 750;
+    font-size: 22px;
+    font-weight: 800;
     color: #eef4fa;
-    letter-spacing: 0;
+    letter-spacing: -0.01em;
     text-transform: none;
+    line-height: 1.25;
 }
 .sys-set-note {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: #8fa3b8;
+    margin: 6px 0 0;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #c5d0dc;
 }
 .sys-set-seg {
     display: inline-flex;
@@ -869,12 +872,12 @@ body {
     background: #0b1118;
 }
 .sys-set-seg-btn {
-    min-width: 110px;
-    min-height: 44px;
+    min-width: 118px;
+    min-height: 48px;
     border: none;
     background: transparent;
     color: #8fa3b8;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 750;
     cursor: pointer;
     padding: 0 18px;
@@ -890,22 +893,34 @@ body {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding-top: 4px;
+    padding-top: 8px;
     border-top: 1px solid #212b36;
+    flex-wrap: wrap;
 }
 .system-settings-tolerance-value-wrap[hidden] { display: none !important; }
 .system-settings-tolerance-value-wrap label {
     margin: 0;
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 700;
-    color: #8fa3b8;
+    color: #c5d0dc;
     white-space: nowrap;
 }
 .sys-set-tol-input {
-    width: 140px !important;
-    min-height: 44px !important;
-    font-size: 18px !important;
+    width: 160px !important;
+    min-height: 48px !important;
+    font-size: 20px !important;
+    font-weight: 700 !important;
     text-align: center;
+}
+.sys-set-mmss-input {
+    width: 140px !important;
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+}
+.sys-set-mmss-hint {
+    font-size: 14px;
+    font-weight: 650;
+    color: #8fa3b8;
 }
 .sys-set-footer {
     display: flex;
@@ -914,9 +929,9 @@ body {
     border-top: 1px solid #26313d;
 }
 .sys-set-footer .btn {
-    min-height: 46px;
-    min-width: 140px;
-    font-size: 15px;
+    min-height: 52px;
+    min-width: 160px;
+    font-size: 17px;
     font-weight: 750;
     border-radius: 10px;
 }
@@ -1290,6 +1305,74 @@ body {
     font-size: 13px;
 }
 
+/* Home screen: larger cards + clearer title/description on 7" kiosk */
+#page-home .test-options {
+    max-width: 720px;
+    width: 100%;
+    gap: 24px;
+    padding: 0 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#page-home .test-options.has-test-screen {
+    max-width: 920px;
+    gap: 18px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#page-home .test-card {
+    min-height: 300px;
+    padding: 28px 20px;
+}
+
+#page-home .test-options.has-test-screen .test-card {
+    min-height: 280px;
+    padding: 22px 12px;
+}
+
+#page-home .test-icon {
+    margin-bottom: 14px;
+    padding: 14px;
+}
+
+#page-home .test-icon svg {
+    width: 42px;
+    height: 42px;
+    stroke-width: 2.25;
+}
+
+#page-home .test-options.has-test-screen .test-icon svg {
+    width: 36px;
+    height: 36px;
+}
+
+#page-home .test-card h2 {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+#page-home .test-options.has-test-screen .test-card h2 {
+    font-size: 22px;
+    margin-bottom: 6px;
+}
+
+#page-home .test-card p {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.98);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+#page-home .test-options.has-test-screen .test-card p {
+    font-size: 14px;
+    line-height: 1.4;
+}
+
 /* Placeholder pages */
 .page:not(#page-home):not(#page-validate):not(#page-validate-type-select).active {
     display: flex;
@@ -1316,30 +1399,40 @@ body {
 }
 
 #page-validate .test-options.test-options-two {
-    max-width: 900px;
+    max-width: 920px;
     gap: 28px;
 }
 
 #page-validate .test-card {
-    min-height: 260px;
+    min-height: 300px;
     padding: 36px 28px;
 }
 
 #page-validate .test-card h2 {
-    font-size: 26px;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 #page-validate .test-card p {
-    font-size: 15px;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.98);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 #page-validate .test-icon {
     padding: 18px;
+    margin-bottom: 14px;
 }
 
 #page-validate .test-icon svg {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
+    stroke-width: 2.25;
 }
 
 .placeholder-page {
@@ -1612,6 +1705,42 @@ body {
 
 #page-manage-recipes .manage-recipes-container.recipe-load-only .recipe-list-container {
     overflow-x: hidden;
+}
+
+/* Load Recipe list — larger, more readable row text on the kiosk */
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table {
+    font-size: 1.1rem;
+}
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table th {
+    font-size: 1.1rem;
+    padding: 14px 12px;
+}
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table td {
+    font-size: 1.2rem;
+    font-weight: 650;
+    padding: 16px 12px;
+    line-height: 1.4;
+}
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table td:first-child {
+    font-size: 1.25rem;
+    font-weight: 750;
+}
+/* Mode/USP, Temp, Steps — emphasize detail columns */
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table th:nth-child(2),
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table th:nth-child(3),
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table th:nth-child(4) {
+    font-size: 1.15rem;
+}
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table td:nth-child(2),
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table td:nth-child(3),
+#page-manage-recipes .manage-recipes-container.recipe-load-only .manage-recipes-table td:nth-child(4) {
+    font-size: 1.35rem;
+    font-weight: 750;
+    color: #f1f5f9;
+}
+#page-manage-recipes .manage-recipes-container.recipe-load-only .empty-state-message {
+    font-size: 1.15rem;
+    font-weight: 650;
 }
 
 /* Modals */
@@ -2304,11 +2433,91 @@ body {
     grid-column: 1 / -1;
     display: flex;
     gap: 10px;
-    justify-content: flex-end;
+    justify-content: center;
 }
 .heater-ctrl-actions .btn {
-    min-width: 140px;
-    min-height: 44px;
+    min-width: 160px;
+    min-height: 48px;
+}
+
+/* Hardware Initialise — centered large primary action */
+.page-content:has(#page-hardware-init.active) {
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px 10px !important;
+}
+#page-hardware-init.active {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+.hw-init-page {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 16px 20px;
+}
+.hw-init-card {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 28px;
+    padding: 28px 32px;
+    border-radius: 18px;
+    background: rgba(28, 35, 45, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-sizing: border-box;
+}
+.hw-init-status-band {
+    text-align: center;
+    padding: 18px 16px;
+    border-radius: 14px;
+    background: rgba(15, 23, 32, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.hw-init-phase {
+    font-size: 28px;
+    font-weight: 800;
+    color: #f1f5f9;
+    margin-bottom: 8px;
+    line-height: 1.2;
+}
+.hw-init-detail {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: rgba(226, 232, 240, 0.85);
+}
+.hw-init-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+.hw-init-primary-btn,
+#hw-init-start-btn {
+    min-width: 280px;
+    min-height: 64px;
+    font-size: 22px !important;
+    font-weight: 800 !important;
+    border-radius: 14px;
+    padding: 14px 28px;
+}
+#hw-init-done-btn {
+    min-width: 200px;
+    min-height: 48px;
+    font-size: 16px;
+    font-weight: 700;
 }
 
 /* ── IP Config Page ──────────────────────────────────────────── */
@@ -2586,20 +2795,23 @@ body {
 
 .temp-cal-page .section-title {
     margin: 0;
-    font-size: 26px;
+    font-size: 28px;
+    font-weight: 800;
     line-height: 1.2;
 }
 
 .temp-cal-page .section-subtitle {
     margin: 0;
-    font-size: 15px;
-    line-height: 1.4;
-    color: var(--text-secondary, rgba(226, 232, 240, 0.7));
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--text-secondary, rgba(226, 232, 240, 0.85));
 }
 
 .temp-cal-intro {
     margin: 0;
-    font-size: 15px;
+    font-size: 16px;
+    font-weight: 550;
     line-height: 1.5;
     color: rgba(148, 163, 184, 0.95);
     max-width: 720px;
@@ -2772,9 +2984,9 @@ body {
     border-radius: 10px;
     background: rgba(28, 35, 45, 0.96);
     padding: 12px 16px;
-    font-size: 14px;
-    font-weight: 600;
-    color: rgba(248, 250, 252, 0.85);
+    font-size: 16px;
+    font-weight: 650;
+    color: rgba(248, 250, 252, 0.9);
 }
 
 .temp-cal-status.is-running {
@@ -5343,13 +5555,42 @@ body.keyboard-open #page-member-biometric.active {
 #page-validate-type-select .test-options {
     margin: 0 auto;
     width: 100%;
-    max-width: 720px;
+    max-width: 860px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
 }
 
 #page-validate-type-select .test-card {
-    min-height: 180px;
+    min-height: 220px;
+    padding: 26px 18px;
+}
+
+#page-validate-type-select .test-icon {
+    margin-bottom: 12px;
+    padding: 14px;
+}
+
+#page-validate-type-select .test-icon svg {
+    width: 40px;
+    height: 40px;
+    stroke-width: 2.25;
+}
+
+#page-validate-type-select .test-card h2 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+#page-validate-type-select .test-card p {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.98);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .add-member-container {
@@ -9420,9 +9661,20 @@ body.keyboard-open {
     margin-bottom: 4px;
 }
 
-/* Temperature validation â€” bath + 6 live vessels */
+/* Temperature validation — bath + 6 live vessels */
+.temp-val-page .section-title {
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 6px;
+}
+
 .temp-val-page .section-subtitle {
     margin-bottom: 20px;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--text-secondary, rgba(226, 232, 240, 0.85));
 }
 
 .temp-val-bath-card {
@@ -9529,15 +9781,16 @@ body.keyboard-open {
 }
 
 .temp-val-live-label {
-    font-size: 11px;
+    font-size: 13px;
+    font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(148, 163, 184, 0.9);
+    color: rgba(148, 163, 184, 0.95);
 }
 
 .temp-val-live-value {
-    font-size: 22px;
-    font-weight: 750;
+    font-size: 26px;
+    font-weight: 800;
     font-variant-numeric: tabular-nums;
     color: #7dd3fc;
 }
@@ -9559,8 +9812,8 @@ body.keyboard-open {
 }
 
 .temp-val-vessel-label {
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 15px;
+    font-weight: 750;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--text-secondary, #94a3b8);
@@ -9718,12 +9971,14 @@ body.keyboard-open {
 }
 .rpm-val-hero .section-title {
     margin: 0 0 4px;
-    font-size: 22px;
+    font-size: 26px;
+    font-weight: 800;
 }
 .rpm-val-page .section-subtitle {
-    margin: 0 0 4px;
-    font-size: 14px;
-    line-height: 1.35;
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
 }
 .rpm-val-layout {
     display: grid;
@@ -9744,7 +9999,7 @@ body.keyboard-open {
     min-width: 0;
 }
 .rpm-val-section-label {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -9893,16 +10148,18 @@ body.keyboard-open {
 }
 
 .phys-params-page .section-title {
-    font-size: 26px;
-    margin: 0 0 2px;
+    font-size: 28px;
+    font-weight: 800;
+    margin: 0 0 4px;
     line-height: 1.2;
 }
 
 .phys-params-page .section-subtitle {
-    margin: 0 0 4px;
-    font-size: 15px;
-    line-height: 1.4;
-    color: var(--text-secondary, rgba(226, 232, 240, 0.7));
+    margin: 0 0 8px;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--text-secondary, rgba(226, 232, 240, 0.85));
 }
 
 .phys-params-content {
@@ -9995,8 +10252,8 @@ body.keyboard-open {
 
 .phys-params-card-head h3 {
     margin: 0;
-    font-size: 15px;
-    font-weight: 650;
+    font-size: 18px;
+    font-weight: 800;
     color: var(--text-primary, #f1f5f9);
     letter-spacing: 0.01em;
 }
@@ -10037,18 +10294,19 @@ body.keyboard-open {
 
 .phys-params-row dt {
     margin: 0;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(148, 163, 184, 0.9);
+    color: rgba(148, 163, 184, 0.95);
     line-height: 1.35;
     padding-top: 2px;
 }
 
 .phys-params-row dd {
     margin: 0;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 550;
     line-height: 1.45;
     color: var(--text-primary, #e2e8f0);
     font-variant-numeric: tabular-nums;
@@ -10071,8 +10329,8 @@ body.keyboard-open {
     gap: 12px;
     cursor: pointer;
     user-select: none;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 17px;
+    font-weight: 650;
     color: var(--text-primary, #f1f5f9);
     line-height: 1.4;
 }
@@ -11289,7 +11547,7 @@ body.keyboard-open {
 .rpm-val-target-block label,
 .rpm-val-timer-label,
 .rpm-val-section-label {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 750;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -11316,9 +11574,10 @@ body.keyboard-open {
 }
 .rpm-val-field-hint {
     margin: 0;
-    font-size: 13px;
-    color: #66788b;
-    line-height: 1.35;
+    font-size: 15px;
+    font-weight: 550;
+    color: #8fa3b8;
+    line-height: 1.4;
 }
 .rpm-val-timer-block {
     align-items: center;
@@ -11430,8 +11689,10 @@ body.keyboard-open {
     box-sizing: border-box;
 }
 .val-suite-review-lead {
-    font-size: 18px;
-    color: rgba(226, 232, 240, 0.92);
+    font-size: 20px;
+    font-weight: 600;
+    color: rgba(226, 232, 240, 0.95);
+    line-height: 1.45;
 }
 .val-suite-review-summary {
     flex: 1 1 auto;
@@ -11446,7 +11707,8 @@ body.keyboard-open {
     padding: 18px 20px;
     border-radius: 12px;
     background: #131a23;
-    font-size: 18px;
+    font-size: 20px;
+    font-weight: 650;
 }
 .val-suite-review-actions {
     display: flex;
@@ -11465,4 +11727,160 @@ body.keyboard-open {
     height: 100%;
     min-height: 0;
     overflow: hidden;
+}
+
+/* Calibration type select — larger card title/description (scoped; not recipe pages) */
+#page-calibration-type-select .section-title {
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+#page-calibration-type-select .section-subtitle {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--text-secondary, rgba(226, 232, 240, 0.85));
+}
+
+#page-calibration-type-select .validation-type-settings-card {
+    min-height: 240px;
+    padding: 28px 22px;
+}
+
+#page-calibration-type-select .validation-type-settings-card h3 {
+    font-size: 24px;
+    font-weight: 800;
+    margin: 0 0 8px 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+#page-calibration-type-select .validation-type-settings-card p {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+    opacity: 0.98;
+}
+
+#page-load-calibration .section-title,
+#page-distance-zero-calibration .section-title {
+    font-size: 26px;
+    font-weight: 800;
+}
+
+#page-load-calibration .section-subtitle,
+#page-distance-zero-calibration .section-subtitle,
+#page-load-calibration .validation-instructions-card p,
+#page-distance-zero-calibration .validation-instructions-card p {
+    font-size: 16px;
+    font-weight: 550;
+    line-height: 1.45;
+}
+
+#page-load-calibration .validation-card-label,
+#page-distance-zero-calibration .validation-card-label {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+#page-load-calibration .validation-card-value,
+#page-distance-zero-calibration .validation-card-value {
+    font-size: 22px;
+    font-weight: 800;
+}
+
+/* Sample volume validation + result screens */
+.sv-val-page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 20px 24px;
+    box-sizing: border-box;
+}
+
+.sv-val-lead {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--text-secondary, rgba(226, 232, 240, 0.9));
+    margin: 0 0 18px;
+}
+
+.sv-val-field label {
+    display: block;
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-primary, #f1f5f9);
+}
+
+.sv-val-input {
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    min-height: 48px !important;
+}
+
+.sv-val-status-line {
+    font-size: 17px;
+    font-weight: 650;
+    margin: 16px 0;
+    color: rgba(248, 250, 252, 0.9);
+}
+
+.sv-val-result-fit .section-title,
+#page-temperature-validation-result .section-title,
+#page-rpm-validation-result .section-title,
+#page-sample-volume-validation-result .section-title {
+    font-size: 26px;
+    font-weight: 800;
+}
+
+.sv-val-result-fit .section-subtitle,
+#page-temperature-validation-result .section-subtitle,
+#page-rpm-validation-result .section-subtitle,
+#page-sample-volume-validation-result .section-subtitle {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.sv-val-result-compact {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 18px;
+    font-size: 17px;
+    font-weight: 650;
+}
+
+#page-calibration .temp-cal-page label,
+#page-calibration .form-group label {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+#page-calibration #temp-cal-measured {
+    font-size: 20px;
+    font-weight: 700;
+    min-height: 48px;
+}
+
+
+/* Quick Test — UART debug tail */
+.uart-log-view {
+    display: block;
+    max-height: 200px;
+    overflow: auto;
+    margin: 0;
+    padding: 10px;
+    background: #0f172a;
+    color: #a7f3d0;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.quick-test-uart-panel summary {
+    font-weight: 600;
 }

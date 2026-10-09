@@ -55,6 +55,26 @@ _sim = {
     "rpm": 0,
 }
 
+_preheat_ready = False
+_preheat_ready_lock = threading.Lock()
+
+
+def clear_preheat_ready() -> None:
+    global _preheat_ready
+    with _preheat_ready_lock:
+        _preheat_ready = False
+
+
+def is_preheat_ready() -> bool:
+    with _preheat_ready_lock:
+        return bool(_preheat_ready)
+
+
+def _mark_preheat_ready() -> None:
+    global _preheat_ready
+    with _preheat_ready_lock:
+        _preheat_ready = True
+
 
 def init(app, config):
     global _logger, _config, _port_name, _baud, _simulate, _uart_log_path, _reader_started
@@ -224,6 +244,8 @@ def _handle_rx_inner(inner: str) -> None:
         _last_sample_phase = None
         _emit_event({"type": "END-TEST", "raw": inner})
     elif "PRE-DONE" in upper:
+        if "TIMEOUT" not in upper:
+            _mark_preheat_ready()
         _emit_event({"type": "PRE-DONE", "raw": inner})
     elif upper.startswith("RECIPE") or ",RECIPE" in upper or upper == "RECIPE,ACK":
         _emit_event({"type": "RECIPE", "raw": inner})
@@ -703,6 +725,7 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
     Early #RECIPE,ACK* before all frames are sent is latched but does NOT stop
     remaining frame TX — ESP may emit RECIPE early; Pi still completes the recipe set.
     """
+    clear_preheat_ready()
     frames = proto.build_recipe_frames(recipe, from_step_index=from_step_index, remaining_sec_in_step=remaining_sec_in_step)
     results = []
     recipe_seen: Optional[str] = None
@@ -828,11 +851,32 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
     wait_done=True  → also wait for PRE-DONE (or return started=True if PRE-DONE is late).
     """
     _drain_pending(0.1)
+    clear_preheat_ready()
     res = _tx(proto.build_pre_heat(), timeout=5.0, expect_prefix="PRE-HEAT")
     ack = str(res.get("ack") or res.get("error") or "")
     ack_u = ack.upper()
     started = bool(res.get("ok")) or ("PRE-HEAT" in ack_u) or ("PRE-HEATTING" in ack_u)
     if not started:
+        if "NRCP" in ack_u:
+            return {
+                "ok": False,
+                "error": (
+                    "No recipe is loaded on the bath controller. "
+                    "Wait for recipe prepare to complete successfully, then try Preheat again."
+                ),
+                "errorCode": "no_recipe",
+                "ack": ack,
+            }
+        if "RCP" in ack_u:
+            return {
+                "ok": False,
+                "error": (
+                    "Recipe was rejected by the bath controller. "
+                    "Check flush volume, sample volume, and other recipe values."
+                ),
+                "errorCode": "recipe_rejected",
+                "ack": ack,
+            }
         return res if res.get("error") else {"ok": False, "error": "PRE-HEAT failed", "tx": proto.build_pre_heat()}
 
     out: Dict[str, Any] = {
@@ -915,6 +959,7 @@ def start_heater(temperature: Any = None, wait_done: bool = False, timeout: floa
 
 def stop_heater() -> Dict[str, Any]:
     """Send #STOP-PRE-HEAT* (cancel preheat / heater OFF)."""
+    clear_preheat_ready()
     res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-PRE-HEAT")
     if res.get("ok"):
         res["heater"] = "off"
@@ -1013,7 +1058,14 @@ def start_test(*, ensure_shaft_home_first: bool = True, home_timeout: float = 12
         res["shaft"] = shaft
     if not res.get("ok"):
         err = str(res.get("error") or res.get("ack") or "")
-        if proto.is_lift_position_error(err):
+        if "NRCP" in err.upper():
+            res["error"] = (
+                "No recipe is loaded on the bath controller. "
+                "Return to Load Recipe or Quick Test, wait for recipe prepare to finish, "
+                "then Preheat and Start again."
+            )
+            res["errorCode"] = "no_recipe"
+        elif proto.is_lift_position_error(err):
             res["errorCode"] = "lift_position"
             res["error"] = (
                 "Lifting column is not in position. "

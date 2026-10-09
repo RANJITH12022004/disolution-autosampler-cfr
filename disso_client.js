@@ -118,7 +118,7 @@
     if (!recipe || typeof initDissolutionTestRun !== 'function') {
       return false;
     }
-    initDissolutionTestRun(recipe);
+    initDissolutionTestRun(recipe, { skipPrepare: true });
     var dt = window._dissolutionTest;
     if (!dt) return false;
     dt.needsPreheat = false;
@@ -272,6 +272,27 @@
     }).catch(function () { return {}; });
   };
 
+  window.dissoResetRunEndedLatches = function () {
+    _runEndedApplied = false;
+    _runEndedUiCleared = false;
+    window._dissoCompletionBeepPlayed = false;
+    try { window._lastOpenedEndedReportId = null; } catch (e0) { /* ignore */ }
+  };
+
+  window.dissoPrepareNewRun = function () {
+    window.dissoResetRunEndedLatches();
+    return api('/api/disso/test/prepare', { method: 'POST' }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        var err = new Error((res.body && res.body.error) || 'Could not prepare for a new test run.');
+        err.body = res.body;
+        throw err;
+      }
+      window._dissoServerRunActive = false;
+      if (res.body.state) applyStateToUi(res.body.state);
+      return res.body;
+    });
+  };
+
   window.dissoStartTest = function (recipe, meta) {
     meta = meta || {};
     return api('/api/disso/test/start', {
@@ -366,7 +387,11 @@
         _dtSetStatus(aborted ? 'Test aborted' : 'Test completed', aborted ? 'aborted' : 'done');
       }
     }
-    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    if (typeof window._dtCloseReturnableSession === 'function') {
+      window._dtCloseReturnableSession();
+    } else if (typeof refreshHomeTestScreenCard === 'function') {
+      refreshHomeTestScreenCard();
+    }
     if (typeof applyDtRunLockUi === 'function') applyDtRunLockUi();
   }
 
@@ -456,50 +481,69 @@
   function applyStateToUi(st) {
     if (!st) return;
     window._dissoServerState = st;
-    if (st.active && (st.runStatus === 'RUNNING' || st.runStatus === 'PAUSED' || st.runStatus === 'POWER_RESUME_PENDING')) {
-      _runEndedApplied = false;
-      _runEndedUiCleared = false;
-      window._dissoCompletionBeepPlayed = false;
-      try { window._lastOpenedEndedReportId = null; } catch (eClr) { /* ignore */ }
-    }
-    window._dissoServerRunActive = !!(st.active && (
+    var serverLive = !!(st.active && (
       st.runStatus === 'RUNNING' ||
       st.runStatus === 'PAUSED' ||
       st.runStatus === 'POWER_RESUME_PENDING' ||
       st.runStatus === 'FINALIZING'
     ));
+    if (serverLive) {
+      _runEndedApplied = false;
+      _runEndedUiCleared = false;
+      window._dissoCompletionBeepPlayed = false;
+      try { window._lastOpenedEndedReportId = null; } catch (eClr) { /* ignore */ }
+    }
+    window._dissoServerRunActive = serverLive;
     var dt = window._dissolutionTest;
     if (dt && dt._aborting) {
       window._dissoServerRunActive = false;
       dt.running = false;
       dt.paused = false;
     } else if (dt) {
-      if (st.stepIndex != null) dt.stepIndex = st.stepIndex;
-      if (st.remainingSecInStep != null) dt.remainingSec = st.remainingSecInStep;
-      if (st.setSecInStep != null) {
-        dt.setSec = st.setSecInStep;
-      } else if (!(parseInt(dt.setSec, 10) > 0) && dt.steps && dt.steps[dt.stepIndex]) {
-        dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || dt.setSec || 0;
-      }
-      if (st.runStatus === 'RUNNING' || st.runStatus === 'FINALIZING') {
-        dt.running = st.runStatus === 'RUNNING';
-        dt.paused = false;
-      } else if (st.runStatus === 'PAUSED') {
-        dt.running = true;
-        dt.paused = true;
-      } else if (st.runStatus === 'ABORTED' || st.runStatus === 'COMPLETE' || st.active === false) {
+      // Ignore timers/recipe from a finished run — they overwrote new Quick/Load sessions.
+      if (serverLive) {
+        if (st.stepIndex != null) dt.stepIndex = st.stepIndex;
+        if (st.remainingSecInStep != null) dt.remainingSec = st.remainingSecInStep;
+        if (st.setSecInStep != null) {
+          dt.setSec = st.setSecInStep;
+        } else if (!(parseInt(dt.setSec, 10) > 0) && dt.steps && dt.steps[dt.stepIndex]) {
+          dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || dt.setSec || 0;
+        }
+        if (st.runStatus === 'RUNNING' || st.runStatus === 'FINALIZING') {
+          dt.running = st.runStatus === 'RUNNING';
+          dt.paused = false;
+        } else if (st.runStatus === 'PAUSED') {
+          dt.running = true;
+          dt.paused = true;
+        }
+      } else if (st.runStatus === 'ABORTED' || st.runStatus === 'COMPLETE') {
         dt.running = false;
         dt.paused = false;
+        dt.preheating = false;
+        dt.preheatDone = false;
+        dt.preparingStart = false;
+        window._dissoServerRunActive = false;
+        dt._returnableClosed = true;
+      } else if (st.active === false) {
+        // Idle between recipe load / preheat / start — do not wipe preheatDone (was cleared every poll).
+        dt.running = false;
+        dt.paused = false;
+        dt.preparingStart = false;
         window._dissoServerRunActive = false;
       }
     }
+    if (st.preheatReady && dt && dt.needsPreheat && !dt.running && !dt.paused && !dt.preheatDone) {
+      if (typeof window.applyPreheatDoneFromEsp === 'function') {
+        window.applyPreheatDoneFromEsp({ type: 'PRE-DONE', source: 'server-state' });
+      }
+    }
     if (typeof _dtSetText === 'function') {
-      if (st.stepCount != null) {
+      if (serverLive && st.stepCount != null) {
         var stepLabel = ((st.stepIndex || 0) + 1) + ' / ' + st.stepCount;
         _dtSetText('dt-current-step', stepLabel);
         _dtSetText('dt-step', stepLabel);
       }
-      if (st.remainingSecInStep != null) {
+      if (serverLive && st.remainingSecInStep != null) {
         var remHms = (typeof formatHms === 'function')
           ? formatHms(st.remainingSecInStep)
           : (typeof _dtFormatHms === 'function' ? _dtFormatHms(st.remainingSecInStep) : String(st.remainingSecInStep) + 's');

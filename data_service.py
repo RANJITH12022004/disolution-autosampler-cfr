@@ -1122,7 +1122,7 @@ _SYSTEM_SETTINGS_DEFAULTS = {
     "tempToleranceValue": None,
     "printInterval": "Disable",
     "printIntervalValue": None,
-    "printIntervalUnit": "minutes",
+    "printIntervalUnit": "seconds",
 }
 
 _SYSTEM_SETTINGS_ENABLE_KEYS = (
@@ -1265,11 +1265,11 @@ def save_system_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         raw_val = merged.get("printIntervalValue")
         if raw_val is None or raw_val == "":
             raise ValueError(
-                "Print interval must be between 5 seconds and 59 minutes."
+                "Print interval must be between 00:05 and 59:00 (MM:SS)."
             )
         if _print_interval_to_seconds(raw_val, merged.get("printIntervalUnit")) is None:
             raise ValueError(
-                "Print interval must be between 5 seconds and 59 minutes."
+                "Print interval must be between 00:05 and 59:00 (MM:SS)."
             )
     merged["printIntervalValue"] = _normalize_print_interval_value(
         merged.get("printIntervalValue"),

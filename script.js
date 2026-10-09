@@ -183,6 +183,74 @@ function applyHardwareTelemetry(state, opts) {
     }
 }
 
+
+var _quickTestUartPollId = null;
+
+function stopQuickTestUartPoll() {
+    if (_quickTestUartPollId != null) {
+        clearInterval(_quickTestUartPollId);
+        _quickTestUartPollId = null;
+    }
+}
+
+function _quickTestUartLogEl() {
+    return document.getElementById('quick-test-uart-log') || document.getElementById('test-run-uart-log');
+}
+
+function _syncTestRunUartPanelVisibility() {
+    var wrap = document.getElementById('test-run-uart-wrap');
+    if (!wrap) return;
+    var show = !!(window.activeTestRecipe && window.activeTestRecipe.quickTest);
+    wrap.style.display = show ? 'block' : 'none';
+}
+
+function refreshQuickTestUartLog(clearFirst) {
+    var pre = _quickTestUartLogEl();
+    if (!pre) return Promise.resolve();
+    _syncTestRunUartPanelVisibility();
+    var chain = Promise.resolve();
+    if (clearFirst && typeof apiRequest === 'function') {
+        chain = apiRequest(API_BASE + '/api/hardware/log/reset', {
+            method: 'POST',
+            body: { channel: '1' }
+        }).catch(function () { return null; });
+    }
+    return chain.then(function () {
+        if (typeof fetchEspPiLog !== 'function') return null;
+        return fetchEspPiLog(150);
+    }).then(function (data) {
+        if (!pre) return;
+        if (!data) {
+            pre.textContent = 'UART log unavailable.';
+            return;
+        }
+        if (data.error) {
+            pre.textContent = 'UART log error: ' + data.error;
+            return;
+        }
+        var lines = data.lines;
+        pre.textContent = (Array.isArray(lines) && lines.length)
+            ? lines.join('\n')
+            : '(no UART-1 traffic yet — start Quick Test or preheat to see commands)';
+        pre.scrollTop = pre.scrollHeight;
+    }).catch(function (err) {
+        if (pre) pre.textContent = 'Could not load UART log: ' + (err && err.message ? err.message : String(err));
+    });
+}
+
+function startQuickTestUartPoll(resetOnStart) {
+    stopQuickTestUartPoll();
+    refreshQuickTestUartLog(!!resetOnStart);
+    _quickTestUartPollId = setInterval(function () {
+        refreshQuickTestUartLog(false);
+    }, 2500);
+}
+
+window.refreshQuickTestUartLog = refreshQuickTestUartLog;
+window.startQuickTestUartPoll = startQuickTestUartPoll;
+window.stopQuickTestUartPoll = stopQuickTestUartPoll;
+
+
 function fetchEspPiLog(lines) {
     var n = lines != null ? lines : 200;
     return apiRequest(API_BASE + '/api/hardware/log?lines=' + encodeURIComponent(n), { method: 'GET' });
@@ -295,6 +363,7 @@ var lastDisplayedRecipes = [];
 var pendingRecipeToLoad = null;
 var pendingRecipeLoadContext = null;
 var recipeListMode = 'manage'; // 'manage' | 'load'
+var _manageRecipesReturnPage = 'settings'; // 'settings' | 'home'
 var _suppressTestRunNavGuardOnce = false;
 var _suppressValidationRunNavGuardOnce = false;
 var _suppressValidationSuiteNavGuardOnce = false;
@@ -355,7 +424,7 @@ var PAGE_AUDIT_LABELS = {
     'ip-config-result': 'IP Config',
     'hardware-init': 'Hardware Initialise',
     'heater-control': 'Heater',
-    'shaft-control': 'Shaft Controls',
+    'shaft-control': 'Stirrer Unit Controls',
     calibration: 'Calibration',
     'calibration-type-select': 'Select Calibration Type',
     'load-calibration': 'Load Calibration',
@@ -728,9 +797,53 @@ function isDissolutionTestActive() {
 /** True once Preheat has been started (or test is running) — enables Home "Test Screen" card. */
 function hasReturnableDissolutionSession() {
     var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
-    if (!dt || !dt.recipe) return false;
+    if (!dt || !dt.recipe || dt._returnableClosed) return false;
+    var st = window._dissoServerState;
+    if (st && st.active === false) {
+        var rs = String(st.runStatus || '').toUpperCase();
+        if (rs === 'COMPLETE' || rs === 'ABORTED') return false;
+    }
     return !!(dt.preheating || dt.preheatDone || dt.running || dt.paused);
 }
+
+/** Hide Test Screen card after complete/abort (keep recipe for report until cleared). */
+function _dtCloseReturnableSession() {
+    var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
+    if (dt) {
+        dt.preheating = false;
+        dt.preheatDone = false;
+        dt.running = false;
+        dt.paused = false;
+        dt.preparingStart = false;
+        dt._returnableClosed = true;
+    }
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+}
+
+/** Full clear after approval or before a new Quick Test / Load Recipe session. */
+function _dtClearReturnableSession() {
+    _dtStopPreheatTimer();
+    _dtStopTimer();
+    if (typeof _dtClearShaftTimers === 'function') _dtClearShaftTimers();
+    if (typeof _dtClearThermalFlags === 'function') _dtClearThermalFlags();
+    var dt = (typeof _dissolutionTest !== 'undefined' && _dissolutionTest) || window._dissolutionTest || null;
+    if (dt) {
+        dt.preheating = false;
+        dt.preheatDone = false;
+        dt.running = false;
+        dt.paused = false;
+        dt.preparingStart = false;
+        dt.recipe = null;
+        dt.steps = [];
+        dt.recipeUploaded = false;
+        dt._returnableClosed = true;
+    }
+    window.activeTestRecipe = null;
+    try { window._dissoServerRunActive = false; } catch (e0) { /* ignore */ }
+    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+}
+window._dtCloseReturnableSession = _dtCloseReturnableSession;
+window._dtClearReturnableSession = _dtClearReturnableSession;
 
 function refreshHomeTestScreenCard() {
     var card = document.getElementById('home-test-screen-card');
@@ -1685,6 +1798,12 @@ function clearReportApprovalGate() {
     stopReportApprovalPoll();
 }
 
+function clearDissolutionSessionAfterReportClosed() {
+    if (typeof window._dtClearReturnableSession === 'function') {
+        window._dtClearReturnableSession();
+    }
+}
+
 function setReportApprovalGateFromPreview(preview, reportId) {
     if (!isReportPendingApproval(preview)) {
         clearReportApprovalGate();
@@ -1723,7 +1842,8 @@ function startReportApprovalPollIfLocked() {
             stopReportApprovalPoll();
             return;
         }
-        apiRequest(API_BASE + '/api/reports/' + rid + '/preview').then(function (data) {
+        // ?audit=0 — polling must not spam "Report opened" audit rows.
+        apiRequest(API_BASE + '/api/reports/' + rid + '/preview?audit=0').then(function (data) {
             if (!data || !data.preview) return;
             var st = String(data.preview.reportApprovalStatus || '').trim().toLowerCase();
             if (st === 'approved') {
@@ -2071,7 +2191,7 @@ var PAGE_TITLES = {
     'cleaning-cycle': 'Cleaning Cycle',
     'hardware-init': 'Hardware Initialise',
     'heater-control': 'Heater',
-    'shaft-control': 'Shaft Controls',
+    'shaft-control': 'Stirrer Unit Controls',
     'datetime': 'Date and Time',
     'factory-settings': 'Factory Settings',
     'reports': 'Reports',
@@ -2084,7 +2204,7 @@ var PAGE_TITLES = {
     'quick-test': 'Quick Test',
     'test-run': 'Dissolution Test',
     'vessel-temperature': 'Vessel Temperature',
-    'shaft-position': 'Shaft Position'
+    'shaft-position': 'Stirrer Unit Controls'
 };
 
 async function fetchDateTimeFromBackend() {
@@ -3100,7 +3220,14 @@ function goToPage(pageName) {
     if (pageName === 'quick-test') {
         setTimeout(function () {
             if (typeof onQuickDissolutionStepCountChange === 'function') onQuickDissolutionStepCountChange();
+            if (typeof startQuickTestUartPoll === 'function') startQuickTestUartPoll(true);
         }, 50);
+    } else if (pageName === 'test-run' && window.activeTestRecipe && window.activeTestRecipe.quickTest) {
+        setTimeout(function () {
+            if (typeof startQuickTestUartPoll === 'function') startQuickTestUartPoll(false);
+        }, 50);
+    } else if (typeof stopQuickTestUartPoll === 'function') {
+        stopQuickTestUartPoll();
     }
     if (pageName === 'test-run') {
         setTimeout(function () {
@@ -3298,12 +3425,23 @@ function goBack() {
         goToPage('calibration-type-select');
     } else if (pageId === 'page-datetime') {
         goToPage('settings');
+    } else if (pageId === 'page-disable-recipes') {
+        goToPage('settings');
+    } else if (pageId === 'page-member-biometric') {
+        if (typeof backToMemberAfterBiometric === 'function') backToMemberAfterBiometric();
+        else goToPage('user-profile');
     } else if (pageId === 'page-locked-members' || pageId === 'page-disabled-members') {
         goToPage('manage-members');
     } else if (pageId === 'page-manage-recipes') {
-        goToPage('home');
+        if (recipeListMode === 'manage') {
+            goToPage(_manageRecipesReturnPage || 'settings');
+        } else {
+            goToPage('home');
+        }
     } else if (pageId === 'page-export') {
         goToPage('reports');
+    } else if (pageId === 'page-quick-test') {
+        goToPage('home');
     } else if (pageId === 'page-settings' || pageId === 'page-reports' || pageId === 'page-user-profile') {
         goToPage('home');
     } else {
@@ -3869,6 +4007,7 @@ function enrollMemberBiometric() {
 
 function startRecipeTest() {
     recipeListMode = 'load';
+    _manageRecipesReturnPage = 'home';
     goToPage('manage-recipes');
 }
 
@@ -3878,6 +4017,7 @@ function goToLoadRecipeAfterSave() {
         return;
     }
     recipeListMode = 'load';
+    _manageRecipesReturnPage = 'home';
     goToPage('manage-recipes');
 }
 
@@ -4022,6 +4162,10 @@ function onQuickDissolutionStepCountChange() {
 }
 
 function startQuickTest() {
+    if (!(typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) &&
+        typeof window._dtClearReturnableSession === 'function') {
+        window._dtClearReturnableSession();
+    }
     var ids = [
         'quick-product-name', 'quick-temperature', 'quick-step-count',
         'quick-sample-volume', 'quick-rinse-volume',
@@ -4068,8 +4212,10 @@ function startQuickTestRunFromParams() {
     var replenishment = repEl ? String(repEl.value || '').trim() : '';
     var powerFailureMin = pfEl ? parseInt(pfEl.value, 10) : NaN;
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
-    var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
-    var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var mediaVolumeRaw = mediaVolEl && mediaVolEl.value != null ? String(mediaVolEl.value).trim() : '';
+    var mediaVolumeNum = mediaVolumeRaw === '' ? NaN : parseFloat(mediaVolumeRaw);
+    var mediaVolume = (!isNaN(mediaVolumeNum) && mediaVolumeNum >= 0) ? mediaVolumeNum : null;
+    var mediaPh = parseMediaPhInput(mediaPhEl);
     var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : '';
     var autoDispense = (mode === 'Auto');
 
@@ -4090,6 +4236,11 @@ function startQuickTestRunFromParams() {
         showAppModal('Please enter number of steps between 1 and 12.', 'Quick Test');
         return;
     }
+    var quickStepList = document.getElementById('quick-create-recipe-steps-list');
+    var quickRowCount = quickStepList ? quickStepList.querySelectorAll('.dissolution-step-row').length : 0;
+    if (quickRowCount !== stepCount) {
+        renderDissolutionStepRows(stepCount, 'quick-create-recipe-steps-list');
+    }
     if (mode !== 'Auto' && mode !== 'Manual') {
         showAppModal('Please select Sample Drop (Auto or Manual).', 'Quick Test');
         return;
@@ -4102,8 +4253,8 @@ function startQuickTestRunFromParams() {
         showAppModal('Please enter media.', 'Quick Test');
         return;
     }
-    if (!mediaVolume) {
-        showAppModal('Please enter media volume.', 'Quick Test');
+    if (mediaVolume == null) {
+        showAppModal('Please enter a numeric media volume (decimals allowed).', 'Quick Test');
         return;
     }
     if (isNaN(mediaPh) || mediaPh < 0 || mediaPh > 14) {
@@ -4118,10 +4269,13 @@ function startQuickTestRunFromParams() {
         showAppModal('Please enter sample volume.', 'Quick Test');
         return;
     }
-    if (!rinseVolume) {
-        showAppModal('Please enter flush volume.', 'Quick Test');
+    var flushParsed = parseFlushVolumeInput(rinseVolume);
+    if (!flushParsed.ok) {
+        showAppModal(flushParsed.error, 'Quick Test');
         return;
     }
+    rinseVolume = flushParsed.value;
+    mediaPh = formatMediaPhForRecipe(mediaPh);
     if (replenishment !== 'Yes' && replenishment !== 'No') {
         showAppModal('Please select replenishment (Yes or No).', 'Quick Test');
         return;
@@ -4131,7 +4285,6 @@ function startQuickTestRunFromParams() {
         return;
     }
 
-    renderDissolutionStepRows(stepCount, 'quick-create-recipe-steps-list');
     var collected = collectDissolutionStepsFromDom({
         listId: 'quick-create-recipe-steps-list',
         tempId: 'quick-temperature'
@@ -4182,6 +4335,7 @@ function resetQuickTestFormAfterRunIfPending() {
 
 function manageRecipes() {
     recipeListMode = 'manage';
+    _manageRecipesReturnPage = 'settings';
     goToPage('manage-recipes');
 }
 
@@ -4303,7 +4457,37 @@ function onDissolutionStepCountChange() {
 }
 
 function _dissolutionStepListIncludesSampleVolume(listId) {
-    return listId === 'create-recipe-steps-list';
+    // Sample / flush volumes are global on recipe step 1 (and Quick Test), not per step row.
+    return false;
+}
+
+/** Parse media pH allowing decimals (e.g. 6.5, 7.34). */
+function parseMediaPhInput(el) {
+    if (!el) return NaN;
+    var raw = String(el.value != null ? el.value : '').trim().replace(',', '.');
+    if (raw === '') return NaN;
+    var n = parseFloat(raw);
+    if (isNaN(n)) return NaN;
+    return Math.round(n * 1000) / 1000;
+}
+
+function formatMediaPhForRecipe(n) {
+    if (n == null || isNaN(Number(n))) return NaN;
+    return Math.round(Number(n) * 100) / 100;
+}
+
+/** Flush (rinse) volume: 0 allowed; same value applies to every step on the controller. */
+function parseFlushVolumeInput(raw) {
+    var s = String(raw != null ? raw : '').trim();
+    if (s === '') {
+        return { ok: false, error: 'Please enter flush volume (0 if none).' };
+    }
+    var n = parseFloat(s);
+    if (isNaN(n) || n < 0) {
+        return { ok: false, error: 'Flush volume must be zero or a positive number.' };
+    }
+    var out = (n === Math.floor(n)) ? String(Math.floor(n)) : String(n);
+    return { ok: true, value: out };
 }
 
 function renderDissolutionStepRows(n, listId, prefillSteps) {
@@ -4440,8 +4624,10 @@ function validateCreateRecipeStep1Fields() {
     var replenishment = repEl ? String(repEl.value || '').trim() : '';
     var powerFailureMin = pfEl ? parseInt(pfEl.value, 10) : NaN;
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
-    var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
-    var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var mediaVolumeRaw = mediaVolEl && mediaVolEl.value != null ? String(mediaVolEl.value).trim() : '';
+    var mediaVolumeNum = mediaVolumeRaw === '' ? NaN : parseFloat(mediaVolumeRaw);
+    var mediaVolume = (!isNaN(mediaVolumeNum) && mediaVolumeNum >= 0) ? mediaVolumeNum : null;
+    var mediaPh = parseMediaPhInput(mediaPhEl);
     var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : '';
 
     if (!productName) {
@@ -4473,8 +4659,8 @@ function validateCreateRecipeStep1Fields() {
         showAppModal('Please enter media.', 'Create Recipe');
         return null;
     }
-    if (!mediaVolume) {
-        showAppModal('Please enter media volume.', 'Create Recipe');
+    if (mediaVolume == null) {
+        showAppModal('Please enter a numeric media volume (decimals allowed).', 'Create Recipe');
         return null;
     }
     if (isNaN(mediaPh) || mediaPh < 0 || mediaPh > 14) {
@@ -4489,10 +4675,13 @@ function validateCreateRecipeStep1Fields() {
         showAppModal('Please enter sample volume.', 'Create Recipe');
         return null;
     }
-    if (!rinseVolume) {
-        showAppModal('Please enter flush volume.', 'Create Recipe');
+    var flushParsedCreate = parseFlushVolumeInput(rinseVolume);
+    if (!flushParsedCreate.ok) {
+        showAppModal(flushParsedCreate.error, 'Create Recipe');
         return null;
     }
+    rinseVolume = flushParsedCreate.value;
+    mediaPh = formatMediaPhForRecipe(mediaPh);
     if (replenishment !== 'Yes' && replenishment !== 'No') {
         showAppModal('Please select replenishment (Yes or No).', 'Create Recipe');
         return null;
@@ -4513,7 +4702,7 @@ function continueCreateRecipeToSteps() {
         var recipeName = nameEl.value ? nameEl.value.trim() : '';
         summaryEl.textContent = (recipeName ? recipeName + ' — ' : '') +
             validated.stepCount + ' step' + (validated.stepCount === 1 ? '' : 's') +
-            '. Enter RPM, duration (min 00:04:00), and sample volume for each step.';
+            '. Enter RPM and duration (min 00:04:00) for each step. Sample and flush volumes are set on the previous screen.';
     }
     renderDissolutionStepRows(validated.stepCount, 'create-recipe-steps-list', window._createRecipeStepPrefill);
     goToPage('create-recipe-step2');
@@ -4549,13 +4738,23 @@ function saveDissolutionRecipe() {
     var replenishment = repEl ? String(repEl.value || '').trim() : '';
     var powerFailureMin = pfEl ? parseInt(pfEl.value, 10) : NaN;
     var media = mediaEl && mediaEl.value ? mediaEl.value.trim() : '';
-    var mediaVolume = mediaVolEl && mediaVolEl.value ? mediaVolEl.value.trim() : '';
-    var mediaPh = mediaPhEl ? parseFloat(mediaPhEl.value) : NaN;
+    var mediaVolumeRaw = mediaVolEl && mediaVolEl.value != null ? String(mediaVolEl.value).trim() : '';
+    var mediaVolumeNum = mediaVolumeRaw === '' ? NaN : parseFloat(mediaVolumeRaw);
+    var mediaVolume = (!isNaN(mediaVolumeNum) && mediaVolumeNum >= 0)
+        ? mediaVolumeNum
+        : (validated.mediaVolume != null ? validated.mediaVolume : null);
+    var mediaPh = parseMediaPhInput(mediaPhEl);
     var batchSize = batchSizeEl && batchSizeEl.value ? batchSizeEl.value.trim() : (validated.batchSize || '');
     var autoDispense = (mode === 'Auto');
 
+    if (mediaVolume == null) {
+        showAppModal('Please enter a numeric media volume (decimals allowed).', 'Create Recipe');
+        goToPage('create-recipe-step1');
+        return;
+    }
+
     renderDissolutionStepRows(stepCount, 'create-recipe-steps-list', window._createRecipeStepPrefill);
-    var collected = collectDissolutionStepsFromDom({ includeSampleVolume: true });
+    var collected = collectDissolutionStepsFromDom();
     if (collected.error) {
         showAppModal(collected.error, 'Create Recipe');
         goToPage('create-recipe-step2');
@@ -4567,10 +4766,8 @@ function saveDissolutionRecipe() {
         return;
     }
 
-    var sampleVolume = recipeSampleVolume ||
-        (collected.steps[0] && collected.steps[0].sampleVolume
-            ? collected.steps[0].sampleVolume
-            : '');
+    var sampleVolume = recipeSampleVolume || validated.sampleVolume || '';
+    mediaPh = formatMediaPhForRecipe(mediaPh);
 
     var recipe = {
         productName: productName,
@@ -6947,7 +7144,7 @@ function buildReportPreviewHtmlById(reportId) {
     var id = parseInt(reportId, 10);
     if (isNaN(id) || id < 1) return Promise.reject(new Error('Invalid report id'));
     return Promise.all([
-        apiRequest(API_BASE + '/api/reports/' + id + '/preview'),
+        apiRequest(API_BASE + '/api/reports/' + id + '/preview?audit=0'),
         _fetchStylesCss()
     ]).then(function (results) {
         var data = results[0];
@@ -6967,15 +7164,14 @@ function buildReportPreviewHtmlById(reportId) {
 function _saveReportPdfSilent(reportId) {
     var id = parseInt(reportId, 10);
     if (isNaN(id) || id < 1) return Promise.resolve(false);
-    return apiRequest(API_BASE + '/api/reports/' + id + '/preview').then(function (data) {
+    // Silent refresh — do not re-audit "Report opened" / "Report PDF generated"
+    // (approve path already wrote those rows when the PDF was first created).
+    return apiRequest(API_BASE + '/api/reports/' + id + '/preview?audit=0').then(function (data) {
         var st = String((data && data.preview && data.preview.reportApprovalStatus) || '').trim().toLowerCase();
         if (st !== 'approved' && st !== 'aborted') return false;
-        return buildReportPreviewHtmlById(id);
-    }).then(function (html) {
-        if (!html) return false;
         return apiRequest(API_BASE + '/api/reports/' + id + '/pdf', {
             method: 'POST',
-            body: { html: html }
+            body: { html: '', audit: false }
         }).then(function () { return true; }).catch(function () { return false; });
     }).catch(function () { return false; });
 }
@@ -7870,9 +8066,11 @@ function applyApprovedReportResponse(data, reportId) {
         currentReportData = null;
         populateReportPreview(preview);
         clearReportApprovalGate();
+        clearDissolutionSessionAfterReportClosed();
         applyReportPreviewLockUi(preview);
     } else {
         clearReportApprovalGate();
+        clearDissolutionSessionAfterReportClosed();
         openReportPreview(reportId);
     }
 }
@@ -7920,7 +8118,7 @@ function submitReportApproveBiometric() {
     }
     var ta = document.getElementById('report-approve-remarks-input');
     var remarks = ta ? ta.value.trim() : '';
-    clearReportApproveVerifyError();-
+    clearReportApproveVerifyError();
     setReportApproveBiometricRetryVisible(false);
     approveReportWithVerifier(id, pf, remarks, 'biometric').then(function (data) {
         if (data && data.ok) {
@@ -9937,14 +10135,61 @@ var SYSTEM_SETTINGS_DEFAULTS = {
     tempToleranceValue: null,
     printInterval: 'Disable',
     printIntervalValue: null,
-    printIntervalUnit: 'minutes'
+    printIntervalUnit: 'seconds'
 };
+
+var PRINT_INTERVAL_MIN_SEC = 5;
+var PRINT_INTERVAL_MAX_SEC = 59 * 60;
+
+function parsePrintIntervalMmSs(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return NaN;
+    // Accept MM:SS, M:SS, or plain seconds for legacy paste.
+    var m = raw.match(/^(\d{1,2}):([0-5]\d)$/);
+    if (m) {
+        return (parseInt(m[1], 10) * 60) + parseInt(m[2], 10);
+    }
+    if (/^\d{1,4}$/.test(raw)) {
+        return parseInt(raw, 10);
+    }
+    return NaN;
+}
+
+function formatPrintIntervalMmSs(totalSec) {
+    var sec = Math.max(0, parseInt(totalSec, 10) || 0);
+    var mm = Math.floor(sec / 60);
+    var ss = sec % 60;
+    return String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+}
+
+function printIntervalSettingsToSeconds(settings) {
+    var s = settings || {};
+    if (String(s.printInterval || '') !== 'Enable') return 0;
+    var val = s.printIntervalValue;
+    if (val == null || val === '') return 0;
+    var unit = String(s.printIntervalUnit || 'seconds').toLowerCase();
+    var n = parseInt(val, 10);
+    if (isNaN(n) || n < 1) return 0;
+    var sec = (unit === 'minutes' || unit === 'minute') ? (n * 60) : n;
+    if (sec < PRINT_INTERVAL_MIN_SEC || sec > PRINT_INTERVAL_MAX_SEC) return 0;
+    return sec;
+}
+
+function normalizePrintIntervalMmSsInput(el) {
+    if (!el) return;
+    var sec = parsePrintIntervalMmSs(el.value);
+    if (!isNaN(sec) && sec >= 0) {
+        el.value = formatPrintIntervalMmSs(sec);
+    }
+}
 
 function selectSystemSettingCard(btn) {
     if (!btn) return;
     var group = btn.getAttribute('data-group');
     var value = btn.getAttribute('data-value');
     if (!group) return;
+    // Unit is always MM:SS → seconds; ignore legacy unit cards if present.
+    if (group === 'printIntervalUnit') return;
     document.querySelectorAll('.system-settings-page [data-group="' + group + '"]').forEach(function (el) {
         el.classList.toggle('is-selected', el === btn);
     });
@@ -9959,13 +10204,15 @@ function selectSystemSettingCard(btn) {
         var piHidden = document.getElementById('sys-print-interval');
         if (piHidden) piHidden.value = value;
         syncPrintIntervalFieldVisibility();
-    } else if (group === 'printIntervalUnit') {
-        var unitHidden = document.getElementById('sys-print-interval-unit');
-        if (unitHidden) unitHidden.value = value;
     }
 }
 
 function _sysApplyCardGroup(group, value) {
+    if (group === 'printIntervalUnit') {
+        var unitHidden = document.getElementById('sys-print-interval-unit');
+        if (unitHidden) unitHidden.value = 'seconds';
+        return;
+    }
     var cards = document.querySelectorAll('.system-settings-page [data-group="' + group + '"]');
     var matched = false;
     cards.forEach(function (el) {
@@ -9986,9 +10233,6 @@ function _sysApplyCardGroup(group, value) {
     } else if (group === 'printInterval') {
         var piHidden = document.getElementById('sys-print-interval');
         if (piHidden) piHidden.value = value;
-    } else if (group === 'printIntervalUnit') {
-        var unitHidden = document.getElementById('sys-print-interval-unit');
-        if (unitHidden) unitHidden.value = value;
     }
 }
 
@@ -10006,6 +10250,8 @@ function syncPrintIntervalFieldVisibility() {
     var selectEl = document.getElementById('sys-print-interval');
     var wrapEl = document.getElementById('sys-print-interval-value-wrap');
     var valueEl = document.getElementById('sys-print-interval-value');
+    var unitHidden = document.getElementById('sys-print-interval-unit');
+    if (unitHidden) unitHidden.value = 'seconds';
     if (!selectEl || !wrapEl) return;
     var enabled = selectEl.value === 'Enable';
     wrapEl.hidden = !enabled;
@@ -10027,7 +10273,8 @@ function setSystemSettingsForm(settings) {
     _sysApplyCardGroup('beep', s.beep || 'Enable');
     _sysApplyCardGroup('tempTolerance', s.tempTolerance || 'Disable');
     _sysApplyCardGroup('printInterval', s.printInterval || 'Disable');
-    _sysApplyCardGroup('printIntervalUnit', s.printIntervalUnit || 'minutes');
+    var unitHidden = document.getElementById('sys-print-interval-unit');
+    if (unitHidden) unitHidden.value = 'seconds';
     var valueEl = document.getElementById('sys-temp-tolerance-value');
     if (valueEl) {
         valueEl.value = (s.tempToleranceValue != null && !isNaN(Number(s.tempToleranceValue)))
@@ -10036,9 +10283,8 @@ function setSystemSettingsForm(settings) {
     }
     var piValueEl = document.getElementById('sys-print-interval-value');
     if (piValueEl) {
-        piValueEl.value = (s.printIntervalValue != null && !isNaN(Number(s.printIntervalValue)))
-            ? String(s.printIntervalValue)
-            : '';
+        var sec = printIntervalSettingsToSeconds(s);
+        piValueEl.value = sec > 0 ? formatPrintIntervalMmSs(sec) : '';
     }
     syncTempToleranceFieldVisibility();
     syncPrintIntervalFieldVisibility();
@@ -10053,17 +10299,14 @@ function collectSystemSettingsForm() {
     var parsedValue = rawValue === '' ? null : parseFloat(rawValue);
     var printInterval = (document.getElementById('sys-print-interval') || {}).value || 'Disable';
     var piValueEl = document.getElementById('sys-print-interval-value');
-    var piRaw = piValueEl ? String(piValueEl.value || '').trim() : '';
-    var piParsed = piRaw === '' ? null : parseInt(piRaw, 10);
-    var printIntervalUnit = (document.getElementById('sys-print-interval-unit') || {}).value || 'minutes';
-    if (printIntervalUnit !== 'seconds') printIntervalUnit = 'minutes';
+    var piSec = parsePrintIntervalMmSs(piValueEl ? piValueEl.value : '');
     return {
         beep: (document.getElementById('sys-beep') || {}).value || 'Enable',
         tempTolerance: tempTolerance,
         tempToleranceValue: tempTolerance === 'Enable' ? parsedValue : null,
         printInterval: printInterval,
-        printIntervalValue: printInterval === 'Enable' ? piParsed : null,
-        printIntervalUnit: printIntervalUnit
+        printIntervalValue: printInterval === 'Enable' && !isNaN(piSec) ? piSec : null,
+        printIntervalUnit: 'seconds'
     };
 }
 
@@ -10087,13 +10330,9 @@ function saveSystemSettings() {
         }
     }
     if (payload.printInterval === 'Enable') {
-        var piVal = payload.printIntervalValue;
-        var piUnit = payload.printIntervalUnit === 'seconds' ? 'seconds' : 'minutes';
-        var piSec = (piVal != null && !isNaN(piVal))
-            ? (piUnit === 'seconds' ? Number(piVal) : Number(piVal) * 60)
-            : NaN;
-        if (piVal == null || isNaN(piVal) || isNaN(piSec) || piSec < 5 || piSec > (59 * 60)) {
-            showAppModal('Print interval must be between 5 seconds and 59 minutes.', 'Test Settings');
+        var piSec = payload.printIntervalValue;
+        if (piSec == null || isNaN(piSec) || piSec < PRINT_INTERVAL_MIN_SEC || piSec > PRINT_INTERVAL_MAX_SEC) {
+            showAppModal('Print interval must be MM:SS between 00:05 and 59:00.', 'Test Settings');
             return;
         }
     }
@@ -10103,12 +10342,7 @@ function saveSystemSettings() {
         .then(function (result) {
             var settings = (result && result.settings) ? result.settings : payload;
             setSystemSettingsForm(settings);
-            if (typeof logAuditEvent === 'function') {
-                logAuditEvent('Test settings saved', 'Instrument test settings updated', {
-                    eventType: 'lifecycle',
-                    entityType: 'settings'
-                });
-            }
+            // Server writes the single "Test settings saved" audit row.
             showAppModal('Test settings saved.', 'Test Settings');
         })
         .catch(function (err) {
@@ -11832,7 +12066,7 @@ function openHeaterControlPage() {
 
 function openShaftControlPage() {
     if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive()) {
-        showAppModal('Finish or abort the dissolution test before using shaft controls.', 'Shaft Controls');
+        showAppModal('Finish or abort the dissolution test before using stirrer unit controls.', 'Stirrer Unit Controls');
         return;
     }
     goToPage('shaft-control');
@@ -12626,24 +12860,37 @@ function startTestRun(recipe) {
         runRecipe = Object.assign({}, recipe);
         if (Array.isArray(recipe.steps)) runRecipe.steps = recipe.steps.slice();
     }
-    window.activeTestRecipe = runRecipe;
-    // Init first so goToPage title/populate can read _dissolutionTest.recipe.
-    initDissolutionTestRun(runRecipe);
-    goToPage('test-run');
-    // Ensure fields bind after the page is active (RBAC / paint race).
-    _dtPopulateRunRecipeFields(runRecipe);
-    if (_dissolutionTest && _dissolutionTest.steps && _dissolutionTest.steps.length) {
-        _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
-    }
-    setTimeout(function () {
-        if (!_dissolutionTest || !_dissolutionTest.recipe) return;
-        _dtPopulateRunRecipeFields(_dissolutionTest.recipe);
-        if (_dissolutionTest.steps && _dissolutionTest.steps.length) {
+    function launchTestRunAfterPrepare() {
+        window.activeTestRecipe = runRecipe;
+        initDissolutionTestRun(runRecipe, { skipPrepare: true });
+        goToPage('test-run');
+        _dtPopulateRunRecipeFields(runRecipe);
+        if (_dissolutionTest && _dissolutionTest.steps && _dissolutionTest.steps.length) {
             _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
         }
-    }, 50);
-    // On Load: AUTO-DROP first, then SET-TEMP → TS → RPM → DUR → SML → FL (Start only sends START-TEST).
-    _dtUploadRecipeToEsp(runRecipe);
+        setTimeout(function () {
+            if (!_dissolutionTest || !_dissolutionTest.recipe) return;
+            _dtPopulateRunRecipeFields(_dissolutionTest.recipe);
+            if (_dissolutionTest.steps && _dissolutionTest.steps.length) {
+                _dtApplyStep(_dissolutionTest.stepIndex || 0, false);
+            }
+        }, 50);
+        _dtUploadRecipeToEsp(runRecipe);
+    }
+
+    var preparePromise = (typeof window.dissoPrepareNewRun === 'function')
+        ? window.dissoPrepareNewRun()
+        : Promise.resolve();
+    return preparePromise.then(function () {
+        launchTestRunAfterPrepare();
+    }).catch(function (err) {
+        var msg = (err && err.message) ? String(err.message) : 'Could not prepare for a new test run.';
+        var title = runRecipe.quickTest ? 'Quick Test' : 'Load Recipe';
+        showAppModal(msg, title);
+        window.activeTestRecipe = null;
+        pendingRecipeToLoad = null;
+        pendingRecipeLoadContext = null;
+    });
 }
 
 function _dtUploadRecipeToEsp(recipe) {
@@ -13081,7 +13328,8 @@ function formatPowerFailureDisplay(val) {
     return n + ' min';
 }
 
-function initDissolutionTestRun(recipe) {
+function initDissolutionTestRun(recipe, opts) {
+    opts = opts || {};
     _dtStopPreheatTimer();
     _dtStopTimer();
     _dtClearShaftTimers();
@@ -13108,7 +13356,8 @@ function initDissolutionTestRun(recipe) {
         liftPositionBlocked: false,
         tempLog: [],
         shaftUpDisabled: false,
-        shaftDownDisabled: false
+        shaftDownDisabled: false,
+        _returnableClosed: false
     };
     window._dissolutionTest = _dissolutionTest;
     window.activeTestRecipe = recipe;
@@ -13138,15 +13387,32 @@ function initDissolutionTestRun(recipe) {
             }
         }
     }, 0);
-    // Live bath temp in Step Timer panel + server run state.
-    if (typeof window.dissoArmAutoTemp === 'function') {
-        window.dissoArmAutoTemp('test-run');
+    function _dtArmDissolutionRunTelemetry() {
+        if (typeof window.dissoArmAutoTemp === 'function') {
+            window.dissoArmAutoTemp('test-run');
+        }
+        if (typeof window.dissoStartStatePolling === 'function') {
+            window.dissoStartStatePolling();
+        }
+        if (typeof window.dissoStartCmdEventsPolling === 'function') {
+            window.dissoStartCmdEventsPolling();
+        }
     }
-    if (typeof window.dissoStartStatePolling === 'function') {
-        window.dissoStartStatePolling();
+    if (typeof window.dissoResetRunEndedLatches === 'function') {
+        window.dissoResetRunEndedLatches();
     }
-    if (typeof window.dissoStartCmdEventsPolling === 'function') {
-        window.dissoStartCmdEventsPolling();
+    if (opts.skipPrepare) {
+        _dtArmDissolutionRunTelemetry();
+    } else if (typeof window.dissoPrepareNewRun === 'function') {
+        window.dissoPrepareNewRun().then(function () {
+            _dtArmDissolutionRunTelemetry();
+        }).catch(function (err) {
+            var msg = (err && err.message) ? String(err.message) : 'Could not prepare for a new test.';
+            showAppModal(msg, 'Test');
+            _dtArmDissolutionRunTelemetry();
+        });
+    } else {
+        _dtArmDissolutionRunTelemetry();
     }
 }
 
@@ -13468,11 +13734,11 @@ function shaftUnitCommand(cmd, opts) {
     var dt = _dissolutionTest;
     var blockTest = opts.blockWhileTest !== false;
     if (blockTest && dt && (dt.running || dt.paused || dt.preheating)) {
-        showAppModal('Shaft controls are unavailable while a test is running or preheating. Abort the test first.', 'Shaft Position');
+        showAppModal('Stirrer unit controls are unavailable while a test is running or preheating. Abort the test first.', 'Stirrer Unit Controls');
         return;
     }
     if (typeof isDissolutionTestActive === 'function' && isDissolutionTestActive() && opts.fromSettings) {
-        showAppModal('Finish or abort the dissolution test before using Settings shaft controls.', 'Shaft Controls');
+        showAppModal('Finish or abort the dissolution test before using Settings stirrer unit controls.', 'Stirrer Unit Controls');
         return;
     }
 
@@ -13594,8 +13860,19 @@ function _rpmValResetShaftButtons() {
 function dissolutionTestStart() {
     var dt = _dissolutionTest;
     if (!dt || !dt.steps.length) { showAppModal('No recipe steps available.', 'Test'); return; }
-    if (dt.needsPreheat && !dt.preheatDone) { showAppModal('Complete Preheat before starting the test.', 'Preheat'); return; }
     if (dt.preheating) { showAppModal('Preheat is still in progress.', 'Preheat'); return; }
+    if (dt.needsPreheat && !dt.preheatDone) {
+        var startBtn = _dtEl('dt-start-btn');
+        var btnAction = startBtn ? String(startBtn.getAttribute('data-dt-action') || '') : '';
+        var serverReady = !!(window._dissoServerState && window._dissoServerState.preheatReady);
+        if (btnAction === 'start' || serverReady) {
+            dt.preheatDone = true;
+            dt.preheating = false;
+        } else {
+            showAppModal('Complete Preheat before starting the test.', 'Preheat');
+            return;
+        }
+    }
     if (dt.preparingStart) return;
     if (dt.running && !dt.paused) return;
     if (!dt.paused && dt.recipeUploaded === false) {
@@ -13916,8 +14193,7 @@ function _dtOnStepComplete() {
     if (pctEl) pctEl.textContent = '100%';
     if (fillEl) fillEl.style.width = '100%';
     _dtSetStatus('Test completed', 'done');
-    logAuditEvent('Test finished', (dt.recipe.productName || 'Recipe') + ' finished', { eventType: 'lifecycle' });
-    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    if (typeof _dtCloseReturnableSession === 'function') _dtCloseReturnableSession();
     _dtSaveCompletionReport({ aborted: false });
 }
 
@@ -14066,8 +14342,7 @@ function _dtPerformAbort(opts) {
     _dtApplyStep(live.stepIndex, true);
     _dtSetControlsIdle();
     _dtSetStatus('Test aborted', 'aborted');
-    logAuditEvent('Test aborted', (live.recipe.productName || 'Recipe') + ' aborted', { eventType: 'lifecycle' });
-    if (typeof refreshHomeTestScreenCard === 'function') refreshHomeTestScreenCard();
+    if (typeof _dtCloseReturnableSession === 'function') _dtCloseReturnableSession();
 
     function _openAbortPreview(rid) {
         if (rid == null || opts.skipPreview) return rid;
@@ -14087,6 +14362,10 @@ function _dtPerformAbort(opts) {
                 live.reportSaved = true;
                 return _openAbortPreview(rid);
             }
+            if (ok && body && body.hwStopped && rid == null) {
+                live.reportSaved = true;
+                return null;
+            }
             // Server abort may clear the run without returning a report id — save locally.
             live.reportSaved = false;
             return _dtSaveCompletionReport({ aborted: true, skipPreview: !!opts.skipPreview });
@@ -14095,6 +14374,9 @@ function _dtPerformAbort(opts) {
             return _dtSaveCompletionReport({ aborted: true, skipPreview: !!opts.skipPreview });
         }).finally(function () {
             if (_dissolutionTest) _dissolutionTest._aborting = false;
+            if (typeof window.dissoResetRunEndedLatches === 'function') {
+                window.dissoResetRunEndedLatches();
+            }
         });
     }
     return _dtSaveCompletionReport({ aborted: true, skipPreview: !!opts.skipPreview }).finally(function () {

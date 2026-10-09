@@ -43,16 +43,19 @@ def _validate_dissolution_recipe(recipe_data: Dict[str, Any]) -> Dict[str, Any]:
         errors.append("USP must be USP 1 or USP 2")
 
     sample_volume = str(recipe_data.get("sampleVolume") or "").strip()
-    steps = recipe_data.get("steps")
-    has_step_sample = isinstance(steps, list) and any(
-        str((s or {}).get("sampleVolume") or "").strip() for s in steps
-    )
-    if not sample_volume and not has_step_sample:
+    if not sample_volume:
         errors.append("Sample volume is required")
 
     rinse_volume = str(recipe_data.get("rinseVolume") or "").strip()
-    if not rinse_volume:
+    if rinse_volume == "":
         errors.append("Flush volume is required")
+    else:
+        try:
+            rinse_f = float(rinse_volume)
+            if rinse_f < 0:
+                errors.append("Flush volume cannot be negative")
+        except (TypeError, ValueError):
+            errors.append("Flush volume must be a number")
 
     media = str(recipe_data.get("media") or "").strip()
     if not media:
@@ -87,6 +90,7 @@ def _validate_dissolution_recipe(recipe_data: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         errors.append("Power Failure (minutes) is required")
 
+    steps = recipe_data.get("steps")
     if not isinstance(steps, list) or not steps:
         errors.append("At least one step is required")
     else:
@@ -109,10 +113,6 @@ def _validate_dissolution_recipe(recipe_data: Dict[str, Any]) -> Dict[str, Any]:
                     errors.append("{}: duration must be at least 00:04:00 (4 minutes)".format(label))
             except (TypeError, ValueError):
                 errors.append("{}: duration (HH:MM:SS) is required".format(label))
-            step_sample = str(step.get("sampleVolume") or "").strip()
-            if not step_sample and not sample_volume:
-                errors.append("{}: sample volume is required".format(label))
-
     if errors:
         return {"valid": False, "error": "; ".join(errors)}
     return {"valid": True}
@@ -165,7 +165,7 @@ def process_recipe_form_data(form_data: Dict[str, Any]) -> Dict[str, Any]:
         recipe["media"] = str(recipe.get("media") or "").strip()
         recipe["mediaVolume"] = str(recipe.get("mediaVolume") or "").strip()
         try:
-            recipe["mediaPh"] = float(recipe.get("mediaPh"))
+            recipe["mediaPh"] = round(float(recipe.get("mediaPh")), 3)
         except (TypeError, ValueError):
             recipe.pop("mediaPh", None)
         recipe["batchSize"] = str(recipe.get("batchSize") or "").strip()

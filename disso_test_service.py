@@ -60,6 +60,71 @@ _run: Dict[str, Any] = {
     "active": False,
 }
 
+_ACTIVE_BLOCK_STATUSES = frozenset(
+    {"RUNNING", "PAUSED", "POWER_RESUME_PENDING", "FINALIZING"}
+)
+
+
+def _idle_run_state() -> Dict[str, Any]:
+    return {"runStatus": "IDLE", "active": False, "paused": False}
+
+
+def _terminal_run_state(
+    aborted: bool,
+    report_id: Optional[Any],
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Minimal /state after complete/abort — no recipe/timer bleed into the next run."""
+    return {
+        "runStatus": "ABORTED" if aborted else "COMPLETE",
+        "active": False,
+        "paused": False,
+        "completedAtRtc": _now_iso(),
+        "abortReason": reason if aborted else None,
+        "lastReportId": report_id,
+        "reportId": report_id,
+    }
+
+
+def _stop_esp_test_safe() -> None:
+    try:
+        cmd_hw.stop_test()
+    except Exception:
+        if _logger:
+            _logger.exception("[disso_test] stop_test failed")
+
+
+def _reset_pi_run_state() -> None:
+    """Clear Pi checkpoint/memory only — do not touch ESP recipe (needed for Preheat → Start)."""
+    global _end_test_wait_mono, _last_elapsed_mono
+    data_service.clear_test_run_data()
+    with _lock:
+        if not _run.get("active"):
+            _run.clear()
+            _run.update(_idle_run_state())
+        _end_test_wait_mono = None
+        _last_elapsed_mono = None
+
+
+def _prepare_for_new_run() -> None:
+    """Stop orphan ESP activity and reset Pi state before a new recipe upload session."""
+    global _end_test_wait_mono, _last_elapsed_mono
+    _stop_esp_test_safe()
+    _reset_pi_run_state()
+
+
+def prepare_new_session() -> Dict[str, Any]:
+    """Client calls before loading a new recipe (Quick Test / Load Recipe)."""
+    with _lock:
+        if _run.get("active") and str(_run.get("runStatus") or "") in _ACTIVE_BLOCK_STATUSES:
+            return {
+                "ok": False,
+                "error": "A test is still active. Abort it before starting a new run.",
+                "state": copy.deepcopy(_run),
+            }
+    _prepare_for_new_run()
+    return {"ok": True, "state": get_state()}
+
 
 def init(logger=None, config=None, audit_fn=None, save_report_fn=None):
     global _logger, _config, _audit_fn, _save_report_fn, _watchdog_started
@@ -642,10 +707,11 @@ def _on_cmd_event(evt: Dict[str, Any]):
 def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     meta = meta or {}
     with _lock:
-        if _run.get("active") and _run.get("runStatus") in (
-            "RUNNING", "PAUSED", "POWER_RESUME_PENDING", "FINALIZING"
-        ):
+        if _run.get("active") and str(_run.get("runStatus") or "") in _ACTIVE_BLOCK_STATUSES:
             return {"ok": False, "error": "A test is already active", "state": copy.deepcopy(_run)}
+
+    # Do not STOP-TEST / CLR-RECIPE here — recipe was uploaded at Load for Preheat/Start.
+    _reset_pi_run_state()
 
     recipe = dict(recipe or {})
     steps = proto.normalize_steps(recipe)
@@ -868,16 +934,25 @@ def continue_run(user: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def abort(user: Optional[Dict[str, Any]] = None, reason: str = "user_abort") -> Dict[str, Any]:
+    # Always stop the bath ESP, even when Pi memory/checkpoint already cleared.
+    _stop_esp_test_safe()
     with _lock:
         if not _run.get("active"):
-            return {"ok": False, "error": "No active test"}
-    cmd_hw.stop_test()
+            data_service.clear_test_run_data()
+            _run.clear()
+            _run.update(_idle_run_state())
+            return {
+                "ok": True,
+                "aborted": True,
+                "reportId": None,
+                "hwStopped": True,
+                "state": copy.deepcopy(_run),
+            }
     return _complete(aborted=True, user=user, reason=reason)
 
 
 def claim_abort(user: Dict[str, Any]) -> Dict[str, Any]:
-    if not _hydrate_active_from_checkpoint_if_needed():
-        return {"ok": False, "error": "No active test"}
+    _hydrate_active_from_checkpoint_if_needed()
     return abort(user=user, reason="user_abort")
 
 
@@ -920,16 +995,8 @@ def _complete(aborted: bool = False, user: Optional[Dict[str, Any]] = None, reas
     data_service.clear_test_run_data()
 
     with _lock:
-        run["active"] = False
-        run["runStatus"] = "ABORTED" if aborted else "COMPLETE"
-        run["paused"] = False
-        run["completedAtRtc"] = _now_iso()
-        run["abortReason"] = reason if aborted else None
-        run.pop("stepDeadlineMono", None)
-        run["lastReportId"] = report_id
-        run["reportId"] = report_id
         _run.clear()
-        _run.update(run)
+        _run.update(_terminal_run_state(aborted, report_id, reason=reason))
     _audit("Test aborted" if aborted else "Test finished", "report id {}".format(report_id or "—"))
     return {"ok": True, "aborted": aborted, "reportId": report_id, "state": get_state()}
 

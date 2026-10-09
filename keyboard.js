@@ -28,6 +28,13 @@
         ['123', 'Space', ',', 'Enter']
     ];
 
+    // Keyboard layout - decimal pad (pH, volumes) — fewer rows so '.' is not clipped
+    var decimalPadLayout = [
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+        ['.', ',', 'back'],
+        ['Enter']
+    ];
+
     // Keyboard layout - number layout
     var numberLayout = [
         ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
@@ -71,7 +78,11 @@
         // Select layout based on state
         var layout;
         if (numbersActive) {
-            layout = numberLayout;
+            if (currentInput && (_inputWantsDecimalKeyboard(currentInput) || _numberInputAllowsDecimalStep(currentInput))) {
+                layout = decimalPadLayout;
+            } else {
+                layout = numberLayout;
+            }
         } else {
             // Use uppercase layout when caps is active, lowercase otherwise
             layout = (capsLockActive || shiftActive) ? letterLayoutUpper : letterLayout;
@@ -181,7 +192,7 @@
         } else {
             // Regular key
             if (_inputWantsDecimalKeyboard(currentInput) || String(currentInput.type || '').toLowerCase() === 'number') {
-                var allowDecimal = _inputWantsDecimalKeyboard(currentInput);
+                var allowDecimal = _inputWantsDecimalKeyboard(currentInput) || _numberInputAllowsDecimalStep(currentInput);
                 if (key === '.' || key === ',') {
                     if (!allowDecimal || currentInput.value.indexOf('.') >= 0) return;
                     key = '.';
@@ -275,6 +286,15 @@
         if (inputElement.getAttribute('data-decimal-input') === 'true') return true;
         if (String(inputElement.getAttribute('inputmode') || '').toLowerCase() === 'decimal') return true;
         return inputElement.classList.contains('decimal-input');
+    }
+
+    /** type=number with fractional step (e.g. 0.01 for pH) should allow '.' on OSK. */
+    function _numberInputAllowsDecimalStep(inputElement) {
+        if (!inputElement || String(inputElement.type || '').toLowerCase() !== 'number') return false;
+        var stepAttr = inputElement.getAttribute('step');
+        if (stepAttr == null || stepAttr === '' || String(stepAttr).toLowerCase() === 'any') return true;
+        var step = parseFloat(String(stepAttr).replace(',', '.'));
+        return !isNaN(step) && step > 0 && step < 1;
     }
 
     // Open keyboard for input

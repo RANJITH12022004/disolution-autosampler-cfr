@@ -41,6 +41,18 @@ _last_elapsed_mono: Optional[float] = None
 _INTERVAL_LOG_MAX = 500
 _interval_print_busy = False
 _last_interval_print_fail_audit_mono = 0.0
+_PROBE_KEEP = 5
+_probe_updated_at = None
+_probe_samples: List[List[float]] = [[] for _ in range(6)]
+_WAKEUP_BLOCK_STATUSES = (
+    "RUNNING",
+    "PAUSED",
+    "PREHEAT",
+    "PREHEATING",
+    "REFLUSHING",
+    "FINALIZING",
+    "POWER_RESUME_PENDING",
+)
 
 STATES = (
     "IDLE",
@@ -152,6 +164,7 @@ def init(logger=None, config=None, audit_fn=None, save_report_fn=None):
     if not _watchdog_started:
         _watchdog_started = True
         threading.Thread(target=_heartbeat_loop, daemon=True, name="disso-test-hb").start()
+        threading.Thread(target=_wakeup_loop, daemon=True, name="disso-wakeup").start()
     if _logger:
         _logger.info("[disso_test] init")
 
@@ -259,6 +272,7 @@ def _persist(force: bool = False):
         payload["lastHeartbeatRtc"] = _now_iso()
         # Slim disk payload: deadline is memory-only; tempLog stays in RAM for the report.
         payload.pop("stepDeadlineMono", None)
+        payload.pop("reflushDeadlineMono", None)
         payload.pop("tempLog", None)
         td = payload.get("testData")
         if isinstance(td, dict):
@@ -564,6 +578,128 @@ def _merge_test_sync_checkpoint(cp: Dict[str, Any], sync: Dict[str, Any]) -> Dic
         out["elapsedSec"] = max(0, int(sync["elapsedSec"]))
     return out
 
+def _reset_probe_samples_locked() -> None:
+    global _probe_updated_at
+    _probe_updated_at = None
+    for i in range(6):
+        _probe_samples[i] = []
+
+
+def _note_probe_readings() -> None:
+    """Keep the last 5 readings of each beaker. A frame counts once, by its timestamp."""
+    global _probe_updated_at
+    try:
+        live = temp_hw.get_live() or {}
+    except Exception:
+        return
+    stamp = live.get("updatedAt")
+    if stamp is None:
+        return
+    vessels = live.get("vessels") if isinstance(live, dict) else None
+    if not isinstance(vessels, list):
+        return
+    with _lock:
+        if not _run.get("active") or str(_run.get("runStatus") or "") != "RUNNING":
+            return
+        if stamp == _probe_updated_at:
+            return
+        _probe_updated_at = stamp
+        for i in range(6):
+            if i >= len(vessels) or vessels[i] is None:
+                continue
+            try:
+                value = float(vessels[i])
+            except (TypeError, ValueError):
+                continue
+            bucket = _probe_samples[i]
+            bucket.append(value)
+            while len(bucket) > _PROBE_KEEP:
+                bucket.pop(0)
+
+
+def _freeze_step_probe_temps_locked() -> None:
+    """Caller holds _lock. Average this step's beaker readings and start the next step fresh."""
+    idx = int(_run.get("stepIndex") or 0)
+    beakers: List[Optional[float]] = []
+    counts: List[int] = []
+    for i in range(6):
+        vals = list(_probe_samples[i])
+        _probe_samples[i] = []
+        if not vals:
+            beakers.append(None)
+            counts.append(0)
+            continue
+        beakers.append(round(sum(vals) / float(len(vals)), 1))
+        counts.append(len(vals))
+    row = {"step": idx + 1, "beakers": beakers, "samples": counts}
+    td = _run.setdefault("testData", {})
+    if not isinstance(td, dict):
+        td = {}
+        _run["testData"] = td
+    rows = td.get("stepProbeTemps")
+    if not isinstance(rows, list):
+        rows = []
+    replaced = False
+    for i, existing in enumerate(rows):
+        if isinstance(existing, dict) and int(existing.get("step") or 0) == row["step"]:
+            rows[i] = row
+            replaced = True
+            break
+    if not replaced:
+        rows.append(row)
+    td["stepProbeTemps"] = rows
+
+
+def _wakeup_blocks_heater() -> bool:
+    with _lock:
+        if not _run.get("active"):
+            return False
+        return str(_run.get("runStatus") or "") in _WAKEUP_BLOCK_STATUSES
+
+
+def _wakeup_tick() -> None:
+    sched = data_service.get_wakeup_schedule()
+    if not isinstance(sched, dict) or not sched.get("enabled"):
+        return
+    if sched.get("targetTemperature") is None:
+        return
+    when = str(sched.get("wakeupTime") or "")
+    days = sched.get("days") or []
+    if not when or not isinstance(days, list) or not days:
+        return
+    now = datetime.now()
+    day = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[now.weekday()]
+    if day not in days:
+        return
+    hm = now.strftime("%H:%M")
+    if hm != when:
+        return
+    today = now.strftime("%Y-%m-%d")
+    if str(sched.get("lastFiredDate") or "") == today and str(sched.get("lastFiredTime") or "") == hm:
+        return
+    data_service.mark_wakeup_fired(today, hm)
+    if _wakeup_blocks_heater():
+        if _logger:
+            _logger.info("[wakeup] skipped because a test is active")
+        return
+    res = cmd_hw.start_heater(sched.get("targetTemperature"))
+    if _logger:
+        if res.get("ok"):
+            _logger.info("[wakeup] HOLD-TEMP started at %s", sched.get("targetTemperature"))
+        else:
+            _logger.warning("[wakeup] HOLD-TEMP failed: %s", res.get("error"))
+
+
+def _wakeup_loop() -> None:
+    while True:
+        time.sleep(20)
+        try:
+            _wakeup_tick()
+        except Exception:
+            if _logger:
+                _logger.exception("[wakeup] schedule check failed")
+
+
 def _advance_expired_step_locked(now_m: float):
     """Caller holds _lock. Load the next step in this same tick, or hold 0 on the last step.
 
@@ -573,6 +709,7 @@ def _advance_expired_step_locked(now_m: float):
     steps = _recipe_steps_locked()
     idx = int(_run.get("stepIndex") or 0)
     if idx + 1 < len(steps):
+        _freeze_step_probe_temps_locked()
         nxt = steps[idx + 1]
         dur = max(0, int(nxt.get("durationSeconds") or 0))
         _run["stepIndex"] = idx + 1
@@ -583,6 +720,7 @@ def _advance_expired_step_locked(now_m: float):
     _run["remainingSecInStep"] = 0
     _run.pop("stepDeadlineMono", None)
     if _end_test_wait_mono is None:
+        _freeze_step_probe_temps_locked()
         _end_test_wait_mono = now_m
         return False, False
     if (now_m - _end_test_wait_mono) >= _END_TEST_TIMEOUT_SEC:
@@ -650,8 +788,12 @@ def _heartbeat_loop():
 
             # Report TEST RESULTS rows come only from print-interval ticks (not every heartbeat).
             if active and status == "RUNNING":
+                _note_probe_readings()
                 _maybe_interval_print()
-            if active and status in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING", "FINALIZING", "REFLUSHING"):
+            if active and status == "REFLUSHING":
+                if (time.monotonic() - _last_persist_mono) >= _PERSIST_MIN_INTERVAL_SEC:
+                    _persist(force=True)
+            elif active and status in ("RUNNING", "PAUSED", "POWER_RESUME_PENDING", "FINALIZING"):
                 _persist(force=force_persist or status != "RUNNING")
         except Exception:
             if _logger:
@@ -667,6 +809,9 @@ def _on_status(status: Dict[str, Any]):
             return
         state = str(status.get("state") or "").upper()
         if state in ("TEST-RUNNING", "TEST_RUNNING"):
+            # A late TEST-RUNNING frame must not cancel the 4-minute reflush.
+            if str(_run.get("runStatus") or "") in ("REFLUSHING", "FINALIZING", "COMPLETE", "ABORTED"):
+                return
             # Heartbeat owns the step clock while RUNNING. A boundary STATUES
             # frame of 00:00:00 must not zero the next step or skip it.
             clock_owned = str(_run.get("runStatus") or "") == "RUNNING"
@@ -764,8 +909,9 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
         "at": op["at"],
     }
 
-    # Recipe frames are uploaded on Load. If the bath still has no recipe, upload
-    # the recipe already in this request once and send START-TEST one more time.
+    # Recipe frames are uploaded on Load. start_test stops an active HOLD-TEMP
+    # first so this recipe's temperature is used. If the bath still has no recipe,
+    # upload once and send START-TEST one more time.
     start_res = cmd_hw.start_test()
     if not start_res.get("ok") and _start_failed_no_recipe(start_res):
         up = cmd_hw.upload_recipe(recipe)
@@ -792,6 +938,7 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
         global _end_test_wait_mono, _last_elapsed_mono
         _end_test_wait_mono = None
         _last_elapsed_mono = time.monotonic()
+        _reset_probe_samples_locked()
         _run.clear()
         _run.update(
             {
@@ -828,6 +975,7 @@ def start(recipe: Dict[str, Any], user: Dict[str, Any], meta: Optional[Dict[str,
                     "tempLog": [],
                     "intervalLog": [],
                     "printIntervalSec": 0,
+                    "stepProbeTemps": [],
                 },
             }
         )
@@ -1021,6 +1169,17 @@ def _begin_reflush() -> None:
             return
         if not _run.get("active"):
             return
+        td = _run.get("testData") if isinstance(_run.get("testData"), dict) else {}
+        rows = td.get("stepProbeTemps") if isinstance(td, dict) else None
+        step_no = int(_run.get("stepIndex") or 0) + 1
+        already = False
+        if isinstance(rows, list):
+            for existing in rows:
+                if isinstance(existing, dict) and int(existing.get("step") or 0) == step_no:
+                    already = True
+                    break
+        if not already:
+            _freeze_step_probe_temps_locked()
         elapsed = int(_run.get("elapsedSec") or 0)
         _run["runStatus"] = "REFLUSHING"
         _run["active"] = True
@@ -1159,6 +1318,9 @@ def try_startup_power_recovery() -> Dict[str, Any]:
             "reason": "finalizing_no_report",
             "checkpoint": cp,
         }
+    if status == "REFLUSHING":
+        hydrate_from_checkpoint_without_hw(cp)
+        return {"recovered": True, "aborted": False, "reason": "reflush_resume", "state": get_state()}
     if status in ("COMPLETE", "ABORTED", "IDLE"):
         data_service.clear_test_run_data()
         return {"recovered": False, "aborted": False, "reason": "inactive_checkpoint"}
@@ -1263,7 +1425,15 @@ def hydrate_from_checkpoint_without_hw(cp: Dict[str, Any]) -> None:
         _run.update(copy.deepcopy(cp))
         _run["active"] = True
         _run.pop("stepDeadlineMono", None)
-        if _run.get("runStatus") == "RUNNING" and not _run.get("paused"):
+        _run.pop("reflushDeadlineMono", None)
+        if str(_run.get("runStatus") or "") == "REFLUSHING":
+            rem_rf = max(0, int(_run.get("reflushRemainingSec") or REFLUSH_SEC))
+            _run["reflushRemainingSec"] = rem_rf
+            _run["reflushDeadlineMono"] = time.monotonic() + float(rem_rf)
+            _last_elapsed_mono = None
+            _end_test_wait_mono = None
+            _clear_print_interval_locked()
+        elif _run.get("runStatus") == "RUNNING" and not _run.get("paused"):
             rem_now = int(_run.get("remainingSecInStep") or 0)
             _set_step_deadline_locked(rem_now)
             _last_elapsed_mono = time.monotonic()

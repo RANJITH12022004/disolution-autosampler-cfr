@@ -5966,7 +5966,7 @@ def disso_hw_set_temp():
 
 @app.route("/api/hardware/disso/heater/on", methods=["POST"])
 def disso_hw_heater_on():
-    """SET-TEMP (optional) + PRE-HEAT for Settings heater ON."""
+    """#HOLD-TEMP-xx.x* for Settings heater ON. No recipe is required."""
     gate = _require_any_session_internal(
         ["heater-control", "quick-test", "recipe-test"],
         "Forbidden. You do not have permission to control the heater.",
@@ -6003,7 +6003,7 @@ def disso_hw_heater_on():
 
 @app.route("/api/hardware/disso/heater/off", methods=["POST"])
 def disso_hw_heater_off():
-    """#STOP-PRE-HEAT* for Settings heater OFF / cancel preheat."""
+    """#HOLD-TEMP-STOP* for Settings heater OFF. Also stops a recipe preheat."""
     gate = _require_any_session_internal(
         ["heater-control", "quick-test", "recipe-test"],
         "Forbidden. You do not have permission to control the heater.",

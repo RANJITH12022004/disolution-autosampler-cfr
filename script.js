@@ -3723,6 +3723,7 @@ function loginBiometric() {
         var data = result.body || {};
         if (result.ok && data.success && data.user) {
             completeSuccessfulLogin(data.user);
+            _idleBiometricSensor();
             return;
         }
         if (result.status === 403 && data && data.passwordChangeRequired && data.username) {
@@ -3827,6 +3828,14 @@ function showBiometricVerifyFailedOverlay(message, hint) {
     setBiometricOverlayRetryVisible(true);
 }
 
+function _idleBiometricSensor() {
+    return fetch((API_BASE || '') + '/api/biometric/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+    }).catch(function () {});
+}
+
 function hideBiometricProgressOverlay() {
     var overlay = document.getElementById('biometric-progress-overlay');
     if (overlay) overlay.style.display = 'none';
@@ -3888,6 +3897,7 @@ function runBiometricVerifyWithRetry(opts) {
                 if (cancelled) return;
                 if (data && data.ok && data.token) {
                     hideBiometricProgressOverlay();
+                    _idleBiometricSensor();
                     finish({ ok: true, token: String(data.token) });
                     return;
                 }
@@ -6701,6 +6711,7 @@ var _appLoadingCancelHandler = null;
 
 var REFLUSH_LOCK_SEC = 240;
 var _reflushTimerId = null;
+var _reflushShownRem = null;
 
 function _formatReflushClock(sec) {
     var n = Math.max(0, parseInt(sec, 10) || 0);
@@ -6714,9 +6725,26 @@ function hideReflushLock() {
         clearInterval(_reflushTimerId);
         _reflushTimerId = null;
     }
+    _reflushShownRem = null;
     var overlay = document.getElementById('reflush-overlay');
     if (overlay) overlay.style.display = 'none';
     window._reflushLockVisible = false;
+}
+
+function _ensureReflushTick() {
+    if (_reflushTimerId != null) return;
+    _reflushTimerId = setInterval(function () {
+        if (!window._reflushLockVisible) {
+            hideReflushLock();
+            return;
+        }
+        var left = parseInt(_reflushShownRem, 10);
+        if (isNaN(left)) left = 0;
+        if (left > 0) left -= 1;
+        _reflushShownRem = left;
+        var timerEl = document.getElementById('reflush-timer');
+        if (timerEl) timerEl.textContent = _formatReflushClock(left);
+    }, 1000);
 }
 
 /** Full-screen countdown, same role as LeakTest "Releasing pressure". */
@@ -6728,11 +6756,13 @@ function showReflushLock(totalSec) {
         var left = total;
         var overlay = document.getElementById('reflush-overlay');
         var timerEl = document.getElementById('reflush-timer');
+        _reflushShownRem = left;
         if (timerEl) timerEl.textContent = _formatReflushClock(left);
         if (overlay) overlay.style.display = 'flex';
         window._reflushLockVisible = true;
         _reflushTimerId = setInterval(function () {
             left -= 1;
+            _reflushShownRem = left;
             if (timerEl) timerEl.textContent = _formatReflushClock(left);
             if (left <= 0) {
                 hideReflushLock();
@@ -6753,9 +6783,13 @@ function syncReflushLockFromState(st) {
     if (isNaN(rem)) rem = REFLUSH_LOCK_SEC;
     var overlay = document.getElementById('reflush-overlay');
     var timerEl = document.getElementById('reflush-timer');
-    if (timerEl) timerEl.textContent = _formatReflushClock(rem);
+    if (_reflushShownRem == null || Math.abs(_reflushShownRem - rem) > 2) {
+        _reflushShownRem = rem;
+    }
+    if (timerEl) timerEl.textContent = _formatReflushClock(_reflushShownRem);
     if (overlay) overlay.style.display = 'flex';
     window._reflushLockVisible = true;
+    _ensureReflushTick();
     if (!window._dissoCompletionBeepPlayed) {
         window._dissoCompletionBeepPlayed = true;
         if (typeof window.kioskBeep === 'function') {
@@ -12147,6 +12181,9 @@ function cleanupHeaterControlOnLeave() {
         clearInterval(_heaterCtrlPollId);
         _heaterCtrlPollId = null;
     }
+    if (typeof window.dissoStopCmdEventsPolling === 'function') {
+        window.dissoStopCmdEventsPolling();
+    }
     if (typeof window.dissoDisarmAutoTemp === 'function') {
         window.dissoDisarmAutoTemp('leave-heater-control');
     }
@@ -12266,6 +12303,9 @@ function initHeaterControlPage() {
     if (_heaterCtrlPollId) clearInterval(_heaterCtrlPollId);
     _heaterCtrlPollBath();
     _heaterCtrlPollId = setInterval(_heaterCtrlPollBath, 2000);
+    if (typeof window.dissoStartCmdEventsPolling === 'function') {
+        window.dissoStartCmdEventsPolling();
+    }
     if (typeof window.dissoArmAutoTemp === 'function') {
         window.dissoArmAutoTemp('heater-control');
     }
@@ -12275,29 +12315,28 @@ function applyHeaterControlTemp() {
     if (_heaterCtrlBusy) return;
     var t = _heaterCtrlValidateTemp();
     if (t == null) return;
-    if (typeof window.dissoSetTemp !== 'function') {
-        showAppModal('Heater control is unavailable.', 'Heater');
+    if (_heaterCtrlOn) {
+        setHeaterControlPower(true);
         return;
     }
-    _heaterCtrlSetBusy(true);
-    _heaterCtrlSetStatus('Setting temperature…', 'busy');
-    window.dissoSetTemp(t).then(function () {
-        if (_heaterCtrlAborted) return;
-        _heaterCtrlSetBusy(false);
-        _heaterCtrlSetStatus('Temperature set to ' + t.toFixed(1) + ' °C.', 'ok');
-        if (typeof logAuditEvent === 'function') {
-            logAuditEvent('Heater set temp', t.toFixed(1) + ' C', {
-                eventType: 'lifecycle', entityType: 'settings'
-            });
-        }
-    }).catch(function (err) {
-        if (_heaterCtrlAborted) return;
-        _heaterCtrlSetBusy(false);
-        var msg = friendlyHardwareError(err, 'Could not set temperature. Try again.');
-        _heaterCtrlSetStatus(msg, 'fail');
-        showAppModal(msg, 'Heater');
-    });
+    _heaterCtrlSetStatus('Temperature set to ' + t.toFixed(1) + ' °C. Turn the heater ON to start.', 'ok');
+    if (typeof logAuditEvent === 'function') {
+        logAuditEvent('Heater set temp', t.toFixed(1) + ' C', {
+            eventType: 'lifecycle', entityType: 'settings'
+        });
+    }
 }
+
+window.applyHoldTempReached = function (evt) {
+    if (!_heaterCtrlOn) return;
+    var raw = String((evt && evt.raw) || '');
+    var match = raw.match(/TEMP-([0-9]+(?:\.[0-9]+)?)/i);
+    var shown = match ? Number(match[1]).toFixed(1) : '';
+    _heaterCtrlSetStatus(
+        shown ? ('Temperature reached — holding ' + shown + ' °C.') : 'Temperature reached — heater holding.',
+        'ok'
+    );
+};
 
 function setHeaterControlPower(on) {
     if (_heaterCtrlBusy) return;
@@ -13123,6 +13162,27 @@ function _dtFormatHms(sec) {
     return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
 }
 
+/** Remaining time for the whole recipe: this step's countdown plus later steps. */
+function _dtTotalRemainingSec(dt) {
+    dt = dt || _dissolutionTest;
+    if (!dt || !dt.steps || !dt.steps.length) return 0;
+    var idx = parseInt(dt.stepIndex, 10);
+    if (isNaN(idx) || idx < 0) idx = 0;
+    if (idx >= dt.steps.length) return 0;
+    var rem = parseInt(dt.remainingSec, 10);
+    if (isNaN(rem) || rem < 0) rem = 0;
+    var total = rem;
+    for (var i = idx + 1; i < dt.steps.length; i++) {
+        var s = parseInt(dt.steps[i] && dt.steps[i].durationSeconds, 10);
+        if (!isNaN(s) && s > 0) total += s;
+    }
+    return total;
+}
+
+function _dtPaintTotalRun() {
+    _dtSetText('dt-total-run', _dtFormatHms(_dtTotalRemainingSec(_dissolutionTest)));
+}
+
 /** Sum of all recipe step durations (total test length). */
 function _dtTotalTestDurationSec(dtOrSteps) {
     var steps = Array.isArray(dtOrSteps)
@@ -13397,6 +13457,7 @@ function _dtUpdateProgress() {
     if (!dt || !dt.steps.length) {
         if (pctEl) pctEl.textContent = '0%';
         if (fillEl) fillEl.style.width = '0%';
+        _dtPaintTotalRun();
         return;
     }
     // Step Timer panel: progress is for the *current step*, not the whole recipe.
@@ -13416,6 +13477,7 @@ function _dtUpdateProgress() {
     pct = Math.max(0, Math.min(100, pct));
     if (pctEl) pctEl.textContent = pct + '%';
     if (fillEl) fillEl.style.width = pct + '%';
+    _dtPaintTotalRun();
 }
 
 function formatPowerFailureDisplay(val) {

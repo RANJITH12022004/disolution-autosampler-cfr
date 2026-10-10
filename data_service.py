@@ -1286,6 +1286,8 @@ _WAKEUP_SCHEDULE_DEFAULTS = {
     "wakeupTime": "",
     "targetTemperature": None,
     "days": [],
+    "lastFiredDate": "",
+    "lastFiredTime": "",
 }
 
 
@@ -1331,6 +1333,8 @@ def get_wakeup_schedule() -> Dict[str, Any]:
         settings["enabled"] = bool(raw.get("enabled"))
     settings["wakeupTime"] = _normalize_wakeup_time(raw.get("wakeupTime", settings["wakeupTime"]))
     settings["days"] = _normalize_wakeup_days(raw.get("days", settings["days"]))
+    settings["lastFiredDate"] = str(raw.get("lastFiredDate") or "")[:10]
+    settings["lastFiredTime"] = _normalize_wakeup_time(raw.get("lastFiredTime") or "")
 
     temp_raw = raw.get("targetTemperature", settings["targetTemperature"])
     if temp_raw is None or temp_raw == "":
@@ -1365,6 +1369,10 @@ def save_wakeup_schedule(settings: Dict[str, Any]) -> Dict[str, Any]:
                 merged["targetTemperature"] = max(20.0, min(50.0, temp))
             except (TypeError, ValueError):
                 merged["targetTemperature"] = None
+    if "lastFiredDate" in settings:
+        merged["lastFiredDate"] = str(settings.get("lastFiredDate") or "")[:10]
+    if "lastFiredTime" in settings:
+        merged["lastFiredTime"] = _normalize_wakeup_time(settings.get("lastFiredTime") or "")
 
     path = _get_storage_path("wakeupSchedule.json")
     payload = {
@@ -1372,9 +1380,19 @@ def save_wakeup_schedule(settings: Dict[str, Any]) -> Dict[str, Any]:
         "wakeupTime": merged.get("wakeupTime") or "",
         "targetTemperature": merged.get("targetTemperature"),
         "days": list(merged.get("days") or []),
+        "lastFiredDate": str(merged.get("lastFiredDate") or "")[:10],
+        "lastFiredTime": _normalize_wakeup_time(merged.get("lastFiredTime") or ""),
     }
     _save_json_file(path, payload)
     return payload
+
+
+def mark_wakeup_fired(fired_date: str, fired_time: str) -> Dict[str, Any]:
+    """Remember that this calendar day and clock time already started the heater."""
+    current = get_wakeup_schedule()
+    current["lastFiredDate"] = str(fired_date or "")[:10]
+    current["lastFiredTime"] = _normalize_wakeup_time(fired_time)
+    return save_wakeup_schedule(current)
 
 
 # =================== SESSION ==========================

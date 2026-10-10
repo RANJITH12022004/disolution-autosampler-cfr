@@ -433,6 +433,25 @@ def build_stop_heat() -> str:
     return wrap("STOP-PRE-HEAT")
 
 
+def build_hold_temp(temperature: Any) -> str:
+    """Settings / wakeup heater on (#HOLD-TEMP-37.0*)."""
+    try:
+        t = float(temperature)
+    except (TypeError, ValueError):
+        t = 37.0
+    return wrap("HOLD-TEMP-{:.1f}".format(t))
+
+
+def build_hold_temp_stop() -> str:
+    """Settings heater off (#HOLD-TEMP-STOP*)."""
+    return wrap("HOLD-TEMP-STOP")
+
+
+def build_clr_recipe() -> str:
+    """Clear a locked bath recipe so the next upload can start with AUTO-DROP."""
+    return wrap("CLR-RECIPE")
+
+
 def build_start_pld(rpm: int) -> str:
     """Start stirrer / paddle motor at RPM (#START-PLD-150*)."""
     return wrap("START-PLD-{}".format(int(rpm)))

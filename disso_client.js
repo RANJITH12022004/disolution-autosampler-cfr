@@ -511,6 +511,14 @@
     st = st || {};
     if (_runEndedApplied) return;
     var status = String(st.runStatus || '').toUpperCase();
+    var liveRs = window._dissoServerState
+      ? String(window._dissoServerState.runStatus || '').toUpperCase()
+      : '';
+    // END-TEST arrives at the start of the 4-minute reflush. Do not clear the
+    // screen or open a report until the server has actually finished.
+    if ((liveRs === 'REFLUSHING' || liveRs === 'FINALIZING') && !(st.lastReportId || st.reportId)) {
+      return;
+    }
     // Still saving report on the server — keep polling; do not latch closed.
     if (status === 'FINALIZING') {
       return;
@@ -553,8 +561,12 @@
     if (serverLive) {
       _runEndedApplied = false;
       _runEndedUiCleared = false;
-      window._dissoCompletionBeepPlayed = false;
-      try { window._lastOpenedEndedReportId = null; } catch (eClr) { /* ignore */ }
+      var rsLive = String(st.runStatus || '').toUpperCase();
+      // Do not clear the completion beep during reflush — that retriggered BEEP-2 on every poll.
+      if (rsLive === 'RUNNING' || rsLive === 'PAUSED' || rsLive === 'POWER_RESUME_PENDING') {
+        window._dissoCompletionBeepPlayed = false;
+        try { window._lastOpenedEndedReportId = null; } catch (eClr) { /* ignore */ }
+      }
     }
     window._dissoServerRunActive = serverLive;
     var dt = window._dissolutionTest;
@@ -784,6 +796,10 @@
         if (typeof window.applyPreheatDoneFromEsp === 'function') {
           window.applyPreheatDoneFromEsp(evt);
         }
+      } else if (evt.type === 'HOLD-TEMP-RCH') {
+        if (typeof window.applyHoldTempReached === 'function') {
+          window.applyHoldTempReached(evt);
+        }
       } else if (
         evt.type === 'SAMPLE-COLLECT' ||
         evt.type === 'SAMPLE-FLUSH' ||
@@ -798,10 +814,8 @@
           fetchStateNow().then(function (st) {
             var rs = st ? String(st.runStatus || '').toUpperCase() : '';
             var rid = st && (st.lastReportId || st.reportId);
-            if (rs === 'FINALIZING') {
-              if (attempt < 24) {
-                setTimeout(function () { tryEnd(attempt + 1); }, 250);
-              }
+            if (rs === 'REFLUSHING' || rs === 'FINALIZING') {
+              setTimeout(function () { tryEnd(attempt); }, 1000);
               return;
             }
             if ((rs === 'COMPLETE' || rs === 'ABORTED') && rid) {
@@ -809,14 +823,11 @@
               return;
             }
             if (rs === 'COMPLETE' || rs === 'ABORTED') {
-              // COMPLETE without id — still trigger retry path inside helper.
-              applyDissolutionRunEndedFromServer(st || { runStatus: 'COMPLETE' });
+              applyDissolutionRunEndedFromServer(st || { runStatus: rs });
               return;
             }
             if (attempt < 24) {
               setTimeout(function () { tryEnd(attempt + 1); }, 250);
-            } else {
-              applyDissolutionRunEndedFromServer({ runStatus: 'COMPLETE' });
             }
           });
         };

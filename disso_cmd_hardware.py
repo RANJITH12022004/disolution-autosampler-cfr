@@ -34,6 +34,8 @@ _uart_log_path = ""
 _uart_log_lock = threading.Lock()
 # Serialize multi-frame sequences (recipe upload) vs shaft/heater commands.
 _bus_lock = threading.RLock()
+# Settings or wakeup heater is holding temperature with #HOLD-TEMP-*.
+_hold_temp_active = False
 # Async completions that arrived while waiting for a different ACK (must not drop).
 _deferred_acks: List[str] = []
 _deferred_lock = threading.Lock()
@@ -280,6 +282,8 @@ def _handle_rx_inner(inner: str) -> None:
         if "TIMEOUT" not in upper:
             _mark_preheat_ready()
         _emit_event({"type": "PRE-DONE", "raw": inner})
+    elif "HOLD-TEMP-RCH" in upper:
+        _emit_event({"type": "HOLD-TEMP-RCH", "raw": inner})
     elif upper.startswith("RECIPE") or ",RECIPE" in upper or upper == "RECIPE,ACK":
         _emit_event({"type": "RECIPE", "raw": inner})
     elif "ERR,RCP" in upper or "ERR,RCP" in upper.replace(" ", ""):
@@ -335,6 +339,7 @@ def _is_async_completion(inner: str) -> bool:
         upper.startswith("RECIPE")
         or "RECIPE,ACK" in upper
         or "PRE-DONE" in upper
+        or "HOLD-TEMP-RCH" in upper
         or "LF-CL-HOME" in upper
         or "LF-CU-HOME" in upper
         or "END-TEST" in upper
@@ -447,6 +452,11 @@ def _error_matches_expect(inner: str, expect_prefix: Optional[Union[str, Sequenc
     if "NRCP" in upper:
         for token in tokens:
             if token.startswith("START-TEST") or token.startswith("PRE-HEAT") or token.startswith("STOP-TEST"):
+                return True
+    # ERR,LOCK is the bath refusing a new recipe while one is still locked.
+    if "LOCK" in upper:
+        for token in tokens:
+            if any(token.startswith(name) or name in token for name in recipe_tokens):
                 return True
     return False
 
@@ -625,6 +635,14 @@ def _simulate_handle_tx(frame: str) -> str:
         return inner + (",ACK" if ",ACK" not in upper else "")
     if upper in ("AUTO-DROP-ON", "AUTO-DROP-OFF"):
         return upper + ",ACK"
+    if upper.startswith("HOLD-TEMP-") and not upper.startswith("HOLD-TEMP-RCH") and upper != "HOLD-TEMP-STOP":
+        with _sim_lock:
+            _sim["heater_on"] = True
+        return inner + ",ACK"
+    if upper == "HOLD-TEMP-STOP":
+        with _sim_lock:
+            _sim["heater_on"] = False
+        return "HOLD-TEMP-STOP,ACK"
     if upper == "PRE-HEAT":
         threading.Timer(0.6, lambda: _handle_rx_inner("PRE-DONE,ACK")).start()
         with _sim_lock:
@@ -797,6 +815,48 @@ def _recipe_flush_is_zero(recipe: Dict[str, Any]) -> bool:
         return str(raw).strip() in ("0", "0.0", "0.00")
 
 
+def hold_temp_is_active() -> bool:
+    with _bus_lock:
+        return bool(_hold_temp_active)
+
+
+def _bath_reply_locked(result: Dict[str, Any]) -> bool:
+    blob = " ".join(str(result.get(key) or "") for key in ("error", "ack")).upper()
+    return "LOCK" in blob
+
+
+def stop_hold_temp() -> Dict[str, Any]:
+    """Send #HOLD-TEMP-STOP* and clear the hold flag when the bath accepts it."""
+    global _hold_temp_active
+    res = _tx(proto.build_hold_temp_stop(), timeout=4.0, expect_prefix="HOLD-TEMP-STOP", retries=0)
+    if res.get("ok"):
+        with _bus_lock:
+            _hold_temp_active = False
+        _set_circulation(False)
+        res["heater"] = "off"
+    return res
+
+
+def _stop_hold_temp_for_recipe() -> Optional[Dict[str, Any]]:
+    """Stop a settings/wakeup hold so the recipe temperature is what the bath uses."""
+    if not hold_temp_is_active():
+        return None
+    res = stop_hold_temp()
+    if res.get("ok"):
+        return None
+    return {
+        "ok": False,
+        "error": res.get("error") or "Could not stop the heater hold before the recipe.",
+    }
+
+
+def _release_bath_recipe_lock() -> None:
+    """Clear a locked bath recipe so a new upload can begin."""
+    _stop_hold_temp_for_recipe()
+    _tx(proto.build_clr_recipe(), timeout=2.0, expect_prefix="CLR-RECIPE", retries=0)
+    clear_preheat_ready()
+
+
 def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_sec_in_step: Optional[int] = None) -> Dict[str, Any]:
     """
     Recipe load order:
@@ -832,10 +892,16 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
             return "FL"
         return None
 
+    held = _stop_hold_temp_for_recipe()
+    if held:
+        return held
     with _bus_lock:
         for i, frame in enumerate(frames):
             expect = _expect_for_frame(frame)
             res = _tx(frame, wait_ack=True, timeout=4.0, expect_prefix=expect)
+            if not res.get("ok") and i == 0 and _bath_reply_locked(res):
+                _release_bath_recipe_lock()
+                res = _tx(frame, wait_ack=True, timeout=4.0, expect_prefix=expect)
             results.append(res)
             if not res.get("ok"):
                 err = res.get("error") or "recipe upload failed at frame " + str(frame)
@@ -946,6 +1012,9 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
     wait_done=False → return ok immediately after start ACK (production UI path).
     wait_done=True  → also wait for PRE-DONE (or return started=True if PRE-DONE is late).
     """
+    held = _stop_hold_temp_for_recipe()
+    if held:
+        return held
     _drain_pending(0.1)
     clear_preheat_ready()
     _arm_preheat_watch()
@@ -1043,53 +1112,57 @@ def set_temp(temperature: Any) -> Dict[str, Any]:
 
 def start_heater(temperature: Any = None, wait_done: bool = False, timeout: float = 5.0) -> Dict[str, Any]:
     """
-    Manual heater ON for Settings:
-    optional #SET-TEMP-* then #PRE-HEAT*.
-    By default waits only for PRE-HEATTING ACK (heater started), not PRE-DONE.
+    Settings / wakeup heater ON: #HOLD-TEMP-xx.x*.
+    Does not upload a recipe and does not send #PRE-HEAT*.
+    #HOLD-TEMP-RCH* arrives later when the bath reaches the setpoint; the hold stays on.
     """
-    out: Dict[str, Any] = {"ok": True, "steps": []}
-    if temperature is not None and str(temperature).strip() != "":
-        st = set_temp(temperature)
-        out["steps"].append({"setTemp": st})
-        if not st.get("ok"):
-            out["ok"] = False
-            out["error"] = st.get("error") or "SET-TEMP failed"
-            return out
-        out["temperature"] = st.get("temperature")
-
-    started = pre_heat(timeout=timeout, wait_done=False)
-    out["steps"].append({"preHeat": started})
-    if not started.get("ok"):
-        out["ok"] = False
-        out["error"] = started.get("error") or "PRE-HEAT failed"
-        return out
-
-    if wait_done:
-        done = _wait_for_pre_done(timeout=timeout)
-        out["steps"].append({"preDone": done})
-        out["done"] = bool(done.get("done"))
-        if done.get("ack"):
-            out["ack"] = done.get("ack")
-        else:
-            out["ack"] = started.get("ack")
-        if done.get("ok") is False:
-            out["ok"] = False
-            out["error"] = done.get("error") or "PRE-DONE failed"
-            return out
-    else:
-        out["ack"] = started.get("ack") or "PRE-HEATTING,ACK"
-    out["heater"] = "on"
-    return out
+    global _hold_temp_active
+    try:
+        t = float(temperature)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "temperature must be a number"}
+    if t < 20.0 or t > 50.0:
+        return {"ok": False, "error": "temperature must be between 20 and 50 °C"}
+    t = round(t, 1)
+    res = _tx(
+        proto.build_hold_temp(t),
+        timeout=max(4.0, float(timeout or 5.0)),
+        expect_prefix="HOLD-TEMP-{:.1f}".format(t),
+    )
+    if not res.get("ok"):
+        res["ok"] = False
+        res["error"] = res.get("error") or "HOLD-TEMP failed"
+        return res
+    with _bus_lock:
+        _hold_temp_active = True
+    _set_circulation(True)
+    res["ok"] = True
+    res["heater"] = "on"
+    res["temperature"] = t
+    res["waitingReached"] = not bool(wait_done)
+    return res
 
 
 def stop_heater() -> Dict[str, Any]:
-    """Send #STOP-PRE-HEAT* (cancel preheat / heater OFF)."""
+    """Heater OFF: #HOLD-TEMP-STOP*, and #STOP-PRE-HEAT* so a recipe preheat can cancel too."""
     clear_preheat_ready()
-    res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-PRE-HEAT")
-    if res.get("ok"):
-        res["heater"] = "off"
+    was_holding = hold_temp_is_active()
+    hold = stop_hold_temp()
+    pre = _tx(proto.build_stop_heat(), timeout=4.0, expect_prefix="STOP-PRE-HEAT", retries=0)
+    if was_holding:
+        ok = bool(hold.get("ok"))
+    else:
+        ok = bool(hold.get("ok") or pre.get("ok"))
+    if ok:
         _set_circulation(False)
-    return res
+    out = dict(hold if hold.get("ok") else pre)
+    out["ok"] = ok
+    out["heater"] = "off" if ok else None
+    out["hold"] = hold
+    out["preHeatStop"] = pre
+    if not ok:
+        out["error"] = hold.get("error") or pre.get("error") or "Could not stop the heater."
+    return out
 
 
 def _wait_for_lift_home(timeout: float = 120.0) -> Dict[str, Any]:
@@ -1172,6 +1245,9 @@ def start_test(*, ensure_shaft_home_first: bool = True, home_timeout: float = 12
       1) #LF-CU-DOWN* → wait #LF-CL-HOME,ACK* (shaft at home)
       2) #START-TEST* → wait #START-TEST,ACK*
     """
+    held = _stop_hold_temp_for_recipe()
+    if held:
+        return held
     shaft: Optional[Dict[str, Any]] = None
     if ensure_shaft_home_first:
         shaft = ensure_shaft_home(timeout=home_timeout)

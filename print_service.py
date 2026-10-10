@@ -1096,6 +1096,60 @@ def _append_step_details_two_col(lines: list, steps: list, width: int, thermal: 
             lines.append(f" {left_s}")
 
 
+def _append_step_probe_temps(lines: list, td: Dict[str, Any], report_data: Dict[str, Any], width: int, thermal: bool) -> None:
+    """One averaged row per step for beakers 1–6. Missing readings stay a dash."""
+    rows = []
+    if isinstance(td, dict):
+        rows = td.get("stepProbeTemps") or []
+    if not rows and isinstance(report_data, dict):
+        rows = report_data.get("stepProbeTemps") or []
+    if not isinstance(rows, list) or not rows:
+        return
+    dash = "" if thermal else ("-" * width)
+
+    def _cell(value: Any) -> str:
+        if value is None or value == "":
+            return "--"
+        try:
+            return "{:.1f}".format(float(value))
+        except (TypeError, ValueError):
+            return "--"
+
+    if thermal:
+        lines.extend(["", "STEP PROBE TEMPS"])
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            beakers = row.get("beakers") if isinstance(row.get("beakers"), list) else []
+            while len(beakers) < 6:
+                beakers.append(None)
+            step_no = int(row.get("step") or 0)
+            lines.append("Step {}".format(step_no))
+            lines.append("B1 {} B2 {}".format(_cell(beakers[0]), _cell(beakers[1])))
+            lines.append("B3 {} B4 {}".format(_cell(beakers[2]), _cell(beakers[3])))
+            lines.append("B5 {} B6 {}".format(_cell(beakers[4]), _cell(beakers[5])))
+        return
+
+    lines.extend(["", "STEP PROBE TEMPERATURES", dash if dash else ""])
+    lines.append(
+        f"{'Step':>4}  {'Beaker 1':>8}  {'Beaker 2':>8}  {'Beaker 3':>8}  {'Beaker 4':>8}  {'Beaker 5':>8}  {'Beaker 6':>8}"
+    )
+    if dash:
+        lines.append(dash)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        beakers = row.get("beakers") if isinstance(row.get("beakers"), list) else []
+        while len(beakers) < 6:
+            beakers.append(None)
+        lines.append(
+            f"{int(row.get('step') or 0):02d}    "
+            + "  ".join(f"{_cell(beakers[i]):>8}" for i in range(6))
+        )
+    if dash:
+        lines.append(dash)
+
+
 def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Dict[str, Any], width: int, thermal: bool) -> None:
     """Append comments, step details, continuous TEST RESULTS, and completion line."""
     dash = "" if thermal else ("-" * width)
@@ -1122,6 +1176,7 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
     else:
         lines.extend(["", "STEP DETAILS", dash if dash else ""])
     _append_step_details_two_col(lines, steps, width, thermal)
+    _append_step_probe_temps(lines, td, report_data, width, thermal)
 
     if thermal:
         lines.extend(["", "Comments: {}".format(remarks if remarks not in (None, "") else "____________________")])

@@ -62,14 +62,42 @@ def is_cancel_requested():
     return _cancel_requested.is_set()
 
 
-def _idle_sensor_led():
-    """Best-effort turn off R307 Aura LED after cancel/timeout."""
+def _arm_sensor():
+    """Reopen the UART and wake the R307 before a scan.
+
+    After the port sits idle the module drops the first packet. That miss used to
+    wait out a 2 second timeout before the scanning light ever came on.
+    """
     try:
-        _exec(bytes([_CMD_AURA_LED, 0x04, 0x00, 0x01, 0x00]), timeout_sec=1.0)
-    except Exception:
-        pass
+        with _lock:
+            ser = _open_serial(force_reopen=True)
+            ser.write(b"\x55")
+            ser.flush()
+            time.sleep(0.05)
+            ser.reset_input_buffer()
+    except Exception as exc:
+        if _logger:
+            _logger.warning("[BIOMETRIC] wake failed: %s", exc)
+
+
+def _idle_sensor_led(repeats=3):
+    """Turn the R307 scanning light off. Do not send verify_sensor after this."""
+    n = max(1, int(repeats or 1))
+    for i in range(n):
+        try:
+            # ctrl 4 = always off. A later handshake turns the scan light back on.
+            _exec(bytes([_CMD_AURA_LED, 0x04, 0x00, 0x00, 0x00]), timeout_sec=0.6)
+        except Exception:
+            pass
+        if i + 1 < n:
+            time.sleep(0.08)
+
+
+def _show_scan_led():
+    """Finite flash while a scan is active. Count 0 would blink until an off lands."""
     try:
-        verify_sensor()
+        # ctrl 2 = flash, color 2 = blue, count 8 (not infinite).
+        _exec(bytes([_CMD_AURA_LED, 0x02, 0x30, 0x02, 0x08]), timeout_sec=0.4)
     except Exception:
         pass
 
@@ -324,7 +352,7 @@ def _wait_for_finger(timeout_sec=10.0):
     finally:
         _scan_active.clear()
         try:
-            _idle_sensor_led()
+            _idle_sensor_led(repeats=1)
         except Exception:
             pass
 
@@ -344,6 +372,7 @@ def capture_enroll_finger(buffer_id, timeout_sec=10.0):
     if buffer_id not in (0x01, 0x02):
         return {"ok": False, "error": "buffer_id must be 1 or 2"}
     clear_cancel()
+    _arm_sensor()
     verify = verify_sensor()
     if not verify.get("ok"):
         return verify
@@ -396,27 +425,30 @@ def enroll(template_id, capture_timeout_sec=10.0):
 
 def identify(timeout_sec=10.0):
     clear_cancel()
-    verify = verify_sensor()
-    if not verify.get("ok"):
-        return verify
-    cap = _capture_to_buffer(0x01, timeout_sec=timeout_sec)
-    if not cap.get("ok"):
-        return cap
-    if _cancel_requested.is_set():
-        return {"ok": False, "error": "cancelled", "cancelled": True, "code": None}
-    # Search in sensor library page 0, count 1000
-    search_payload = bytes([_CMD_SEARCH, 0x01]) + (0).to_bytes(2, "big") + (1000).to_bytes(2, "big")
-    found = _exec(search_payload, timeout_sec=2.0)
-    if not found.get("ok"):
-        if found.get("code") in (_CONFIRM_NO_MATCH, _CONFIRM_NOT_FOUND):
-            return {"ok": False, "error": "Fingerprint not recognized", "code": found.get("code")}
-        return found
-    payload = found.get("payload", b"")
-    if len(payload) < 5:
-        return {"ok": False, "error": "Invalid identify response"}
-    template_id = int.from_bytes(payload[1:3], "big")
-    confidence = int.from_bytes(payload[3:5], "big")
-    return {"ok": True, "templateId": template_id, "confidence": confidence}
+    _arm_sensor()
+    _show_scan_led()
+    try:
+        cap = _capture_to_buffer(0x01, timeout_sec=timeout_sec)
+        if not cap.get("ok"):
+            return cap
+        if _cancel_requested.is_set():
+            return {"ok": False, "error": "cancelled", "cancelled": True, "code": None}
+        # Search in sensor library page 0, count 1000
+        search_payload = bytes([_CMD_SEARCH, 0x01]) + (0).to_bytes(2, "big") + (1000).to_bytes(2, "big")
+        found = _exec(search_payload, timeout_sec=2.0)
+        if not found.get("ok"):
+            if found.get("code") in (_CONFIRM_NO_MATCH, _CONFIRM_NOT_FOUND):
+                return {"ok": False, "error": "Fingerprint not recognized", "code": found.get("code")}
+            return found
+        payload = found.get("payload", b"")
+        if len(payload) < 5:
+            return {"ok": False, "error": "Invalid identify response"}
+        template_id = int.from_bytes(payload[1:3], "big")
+        confidence = int.from_bytes(payload[3:5], "big")
+        return {"ok": True, "templateId": template_id, "confidence": confidence}
+    finally:
+        time.sleep(0.15)
+        _idle_sensor_led(repeats=3)
 
 
 def delete_template(template_id):

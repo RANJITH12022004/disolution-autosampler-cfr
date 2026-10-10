@@ -59,6 +59,32 @@ except ImportError:
                 pass
         return None
 
+def _append_run_time_lines(lines, td):
+    """Test duration, reflushing (when run), and total — same idea as leak-test release time."""
+    status_raw = str(td.get("status", "")).lower() if isinstance(td, dict) else ""
+    done_label = "TEST ABORTED" if status_raw == "aborted" else "TEST COMPLETED"
+    total = test_duration_seconds(td) if isinstance(td, dict) else None
+    reflush = 0
+    test_sec = None
+    if isinstance(td, dict):
+        try:
+            reflush = max(0, int(td.get("reflushDurationSec") or 0))
+        except (TypeError, ValueError):
+            reflush = 0
+        if td.get("testDurationSec") is not None and str(td.get("testDurationSec")).strip() != "":
+            try:
+                test_sec = max(0, int(td.get("testDurationSec")))
+            except (TypeError, ValueError):
+                test_sec = None
+    lines.append("")
+    lines.append(done_label)
+    if reflush > 0:
+        if test_sec is None and total is not None:
+            test_sec = max(0, int(total) - reflush)
+        lines.append("Test Duration: {}".format(format_duration_hhmmss(test_sec) if test_sec is not None else "--"))
+        lines.append("Reflushing: {}".format(format_duration_hhmmss(reflush)))
+    lines.append("Total Test Duration: {}".format(format_duration_hhmmss(total) if total is not None else "--"))
+
 A4_CANDIDATES = ["/dev/ttyAMA4", "/dev/ttyUSB0", "/dev/ttyUSB1", "COM3", "COM4"]
 THERMAL_CANDIDATES = ["/dev/ttyAMA3", "/dev/ttyUSB0", "/dev/ttyUSB1", "COM3", "COM4"]
 THERMAL_WIDTH = 32
@@ -1123,11 +1149,7 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
             # New runs stamp printIntervalSec=0 when disabled → omit TEST RESULTS.
             # Legacy reports (no key) still render their stored tempLog.
             if has_pi_key or not legacy_temp:
-                duration_sec = test_duration_seconds(td) if isinstance(td, dict) else None
-                status_raw = str(td.get("status", "")).lower() if isinstance(td, dict) else ""
-                done_label = "TEST ABORTED" if status_raw == "aborted" else "TEST COMPLETED"
-                dur_s = format_duration_hhmmss(duration_sec) if duration_sec is not None else "--"
-                lines.extend(["", done_label, "Total Test Duration: {}".format(dur_s)])
+                _append_run_time_lines(lines, td)
                 return
             temp_log = legacy_temp
         else:
@@ -1189,11 +1211,7 @@ def _append_test_report_details(lines: list, td: Dict[str, Any], report_data: Di
     if not thermal and dash:
         lines.append(dash)
 
-    duration_sec = test_duration_seconds(td) if isinstance(td, dict) else None
-    status_raw = str(td.get("status", "")).lower() if isinstance(td, dict) else ""
-    done_label = "TEST ABORTED" if status_raw == "aborted" else "TEST COMPLETED"
-    dur_s = format_duration_hhmmss(duration_sec) if duration_sec is not None else "--"
-    lines.extend(["", done_label, "Total Test Duration: {}".format(dur_s)])
+    _append_run_time_lines(lines, td)
 
 
 def _format_report_text(report_data: Dict[str, Any], width: int = A4_TEXT_WIDTH) -> str:

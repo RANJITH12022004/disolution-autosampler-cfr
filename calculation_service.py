@@ -160,8 +160,9 @@ def process_recipe_form_data(form_data: Dict[str, Any]) -> Dict[str, Any]:
         if usp in ("USP 1", "USP 2"):
             recipe["usp"] = usp
             recipe["uspMode"] = usp
-        recipe["sampleVolume"] = str(recipe.get("sampleVolume") or "").strip()
-        recipe["rinseVolume"] = str(recipe.get("rinseVolume") or "").strip()
+        recipe["sampleVolume"] = "" if recipe.get("sampleVolume") is None else str(recipe.get("sampleVolume")).strip()
+        # Keep numeric 0 — `or ""` would wipe a zero flush volume.
+        recipe["rinseVolume"] = "" if recipe.get("rinseVolume") is None else str(recipe.get("rinseVolume")).strip()
         recipe["media"] = str(recipe.get("media") or "").strip()
         recipe["mediaVolume"] = str(recipe.get("mediaVolume") or "").strip()
         try:

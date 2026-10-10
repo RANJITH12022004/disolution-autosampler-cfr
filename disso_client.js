@@ -26,89 +26,122 @@
     });
   }
 
+  var _resumeBaseMsg = '';
+
+  function resumeBtnStyle(primary) {
+    if (primary === 'danger') {
+      return 'padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:none;background:#b91c1c;color:#ffffff;';
+    }
+    if (primary) {
+      return 'padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:none;background:#2563eb;color:#ffffff;';
+    }
+    return 'padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid #94a3b8;background:#e2e8f0;color:#0f172a;';
+  }
+
+  function setResumeBusy(busy) {
+    var box = document.getElementById('disso-resume-actions');
+    if (!box) return;
+    var buttons = box.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) buttons[i].disabled = !!busy;
+  }
+
+  function resumeErrorText(res, fallback) {
+    var raw = (res && res.body && res.body.error) || '';
+    if (typeof window.friendlyHardwareError === 'function') {
+      return window.friendlyHardwareError(raw, fallback);
+    }
+    return raw || fallback;
+  }
+
+  function showResumeCardError(text) {
+    var msg = document.getElementById('disso-resume-msg');
+    if (msg) msg.textContent = text || 'Could not complete that action.';
+    setResumeActions('choose');
+  }
+
+  function submitResumeContinue() {
+    setResumeBusy(true);
+    api('/api/disso/test/continue', { method: 'POST' }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        showResumeCardError(resumeErrorText(res, 'Could not continue test.'));
+        return;
+      }
+      var st = (res.body && res.body.state) || {};
+      if (!restoreTestRunFromServerState(st)) {
+        showResumeCardError('Could not open the test. Press Continue again.');
+        return;
+      }
+      hideResumeModal();
+      if (typeof goToPage === 'function') goToPage('test-run');
+      startStatePolling();
+      if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
+    }).catch(function () {
+      showResumeCardError('Could not continue test.');
+    });
+  }
+
+  function submitResumeAbort() {
+    setResumeBusy(true);
+    api('/api/disso/test/claim-abort', { method: 'POST' }).then(function (res) {
+      if (!res.ok || !(res.body && res.body.ok)) {
+        showResumeCardError(resumeErrorText(res, 'Could not abort test.'));
+        return;
+      }
+      hideResumeModal();
+      if (typeof goToPage === 'function') goToPage('home');
+      if (res.body && res.body.reportId && typeof finishTestRunReportSaved === 'function') {
+        finishTestRunReportSaved(res.body.reportId);
+      }
+    }).catch(function () {
+      showResumeCardError('Could not abort test.');
+    });
+  }
+
+  function setResumeActions(kind) {
+    var box = document.getElementById('disso-resume-actions');
+    if (!box) return;
+    if (kind === 'confirm-abort') {
+      box.innerHTML =
+        '<button type="button" id="disso-resume-back" style="' + resumeBtnStyle(false) + '">Back</button>' +
+        '<button type="button" id="disso-resume-confirm-abort" style="' + resumeBtnStyle('danger') + '">Confirm</button>';
+      document.getElementById('disso-resume-back').onclick = function () {
+        var msg = document.getElementById('disso-resume-msg');
+        if (msg) msg.textContent = _resumeBaseMsg;
+        setResumeActions('choose');
+      };
+      document.getElementById('disso-resume-confirm-abort').onclick = submitResumeAbort;
+      return;
+    }
+    box.innerHTML =
+      '<button type="button" id="disso-resume-abort" style="' + resumeBtnStyle(false) + '">Abort</button>' +
+      '<button type="button" id="disso-resume-continue" style="' + resumeBtnStyle(true) + '">Continue</button>';
+    document.getElementById('disso-resume-abort').onclick = function () {
+      var msg = document.getElementById('disso-resume-msg');
+      if (msg) msg.textContent = 'Abort this test? It will be saved as aborted.';
+      setResumeActions('confirm-abort');
+    };
+    document.getElementById('disso-resume-continue').onclick = submitResumeContinue;
+  }
+
   function ensureResumeModal() {
     var existing = document.getElementById('disso-resume-modal');
-    if (existing && existing.getAttribute('data-disso-resume-v') !== '2') {
+    if (existing && existing.getAttribute('data-disso-resume-v') !== '3') {
       existing.remove();
       existing = null;
     }
     if (existing) return;
     var wrap = document.createElement('div');
     wrap.id = 'disso-resume-modal';
-    wrap.setAttribute('data-disso-resume-v', '2');
-    wrap.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
-    // Inline colors only — global .btn-secondary is white-on-glass (invisible on white card).
+    wrap.setAttribute('data-disso-resume-v', '3');
+    wrap.style.cssText = 'display:none;position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
     wrap.innerHTML =
       '<div style="background:#ffffff;max-width:520px;width:92%;padding:24px 28px;border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.25);font-family:inherit;color:#0f172a;">' +
       '<h2 style="margin:0 0 12px;font-size:1.25rem;color:#0f172a;font-weight:700;">Test in progress</h2>' +
       '<p id="disso-resume-msg" style="margin:0 0 20px;line-height:1.45;color:#1e293b;"></p>' +
-      '<div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">' +
-      '<button type="button" id="disso-resume-abort" style="padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid #94a3b8;background:#e2e8f0;color:#0f172a;">Abort</button>' +
-      '<button type="button" id="disso-resume-continue" style="padding:12px 20px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;border:none;background:#2563eb;color:#ffffff;">Continue</button>' +
-      '</div></div>';
+      '<div id="disso-resume-actions" style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;"></div>' +
+      '</div>';
     document.body.appendChild(wrap);
-    document.getElementById('disso-resume-continue').onclick = function () {
-      var contBtn = document.getElementById('disso-resume-continue');
-      var abortBtn = document.getElementById('disso-resume-abort');
-      if (contBtn) contBtn.disabled = true;
-      if (abortBtn) abortBtn.disabled = true;
-      api('/api/disso/test/continue', { method: 'POST' }).then(function (res) {
-        if (!res.ok || !(res.body && res.body.ok)) {
-          if (contBtn) contBtn.disabled = false;
-          if (abortBtn) abortBtn.disabled = false;
-          if (typeof showAppModal === 'function') {
-            var msg = (typeof window.friendlyHardwareError === 'function')
-              ? window.friendlyHardwareError((res.body && res.body.error) || '', 'Could not continue test.')
-              : ((res.body && res.body.error) || 'Could not continue test.');
-            showAppModal(msg, 'Test');
-          }
-          return;
-        }
-        hideResumeModal();
-        var st = (res.body && res.body.state) || {};
-        restoreTestRunFromServerState(st);
-        if (typeof goToPage === 'function') goToPage('test-run');
-        startStatePolling();
-        if (typeof window.dissoPollStateNow === 'function') window.dissoPollStateNow();
-      }).catch(function () {
-        if (contBtn) contBtn.disabled = false;
-        if (abortBtn) abortBtn.disabled = false;
-        if (typeof showAppModal === 'function') {
-          showAppModal('Could not continue test.', 'Test');
-        }
-      });
-    };
-    document.getElementById('disso-resume-abort').onclick = function () {
-      var doAbort = function () {
-        var contBtn = document.getElementById('disso-resume-continue');
-        var abortBtn = document.getElementById('disso-resume-abort');
-        if (contBtn) contBtn.disabled = true;
-        if (abortBtn) abortBtn.disabled = true;
-        api('/api/disso/test/claim-abort', { method: 'POST' }).then(function (res) {
-          hideResumeModal();
-          if (typeof goToPage === 'function') goToPage('home');
-          if (res.body && res.body.reportId && typeof finishTestRunReportSaved === 'function') {
-            finishTestRunReportSaved(res.body.reportId);
-          } else if (!res.ok || !(res.body && res.body.ok)) {
-            if (typeof showAppModal === 'function') {
-              showAppModal((res.body && res.body.error) || 'Could not abort test.', 'Test');
-            }
-          }
-        }).catch(function () {
-          if (contBtn) contBtn.disabled = false;
-          if (abortBtn) abortBtn.disabled = false;
-          if (typeof showAppModal === 'function') {
-            showAppModal('Could not abort test.', 'Test');
-          }
-        });
-      };
-      if (typeof showYesNoModal === 'function') {
-        showYesNoModal('Abort the running dissolution test? It will be saved as aborted.', 'Abort Test', 'Abort', 'Cancel')
-          .then(function (ok) { if (ok) doAbort(); });
-      } else {
-        doAbort();
-      }
-    };
+    setResumeActions('choose');
   }
 
   /** After power-claim Continue: rebuild local test UI from server state (includes recipe). */
@@ -121,11 +154,33 @@
     initDissolutionTestRun(recipe, { skipPrepare: true });
     var dt = window._dissolutionTest;
     if (!dt) return false;
+    dt.recipeUploaded = true;
+    dt.preparingStart = false;
+    var rsEarly = String(st.runStatus || '').toUpperCase();
+    if (rsEarly === 'PREHEAT' || rsEarly === 'READY') {
+      dt.needsPreheat = true;
+      dt.preheatDone = false;
+      dt.preheating = false;
+      dt.running = false;
+      dt.paused = false;
+      window._dissoServerRunActive = false;
+      if (typeof _dtSetPrimaryButton === 'function') _dtSetPrimaryButton('preheat');
+      if (typeof _dtSetStatus === 'function') _dtSetStatus('Press Preheat when ready.', 'ready');
+      if (typeof _dtSyncEquipVisuals === 'function') _dtSyncEquipVisuals();
+      return true;
+    }
+    if (rsEarly === 'REFLUSHING' || rsEarly === 'FINALIZING') {
+      dt.needsPreheat = false;
+      dt.preheatDone = true;
+      dt.preheating = false;
+      dt.running = false;
+      dt.paused = false;
+      window._dissoServerRunActive = true;
+      return true;
+    }
     dt.needsPreheat = false;
     dt.preheatDone = true;
     dt.preheating = false;
-    dt.recipeUploaded = true;
-    dt.preparingStart = false;
     dt.stepIndex = parseInt(st.stepIndex, 10) || 0;
     if (st.setSecInStep != null) dt.setSec = parseInt(st.setSecInStep, 10) || 0;
     if (st.remainingSecInStep != null) dt.remainingSec = parseInt(st.remainingSecInStep, 10) || 0;
@@ -166,8 +221,12 @@
     var product = state.productName || 'Dissolution test';
     var step = ((state.stepIndex || 0) + 1) + '/' + (state.stepCount || '?');
     var status = state.runStatus || 'RUNNING';
-    msg.textContent = starter + ' started "' + product + '" (Step ' + step + '). Status: ' + status +
+    _resumeBaseMsg = starter + ' started "' + product + '" (Step ' + step + '). Status: ' + status +
       '. The test may already be running in the background after power restore. Continue or Abort — all operators are recorded on the report (Performed by).';
+    msg.textContent = _resumeBaseMsg;
+    setResumeActions('choose');
+    if (typeof window.closeOSK === 'function') window.closeOSK();
+    try { document.body.classList.remove('keyboard-open'); } catch (eKb) { /* ignore */ }
     el.style.display = 'flex';
   }
 
@@ -334,31 +393,33 @@
   var _reportOpenRetryTimer = null;
 
   function showSamplingOverlay(message) {
-    if (typeof showLoadingOverlay === 'function') {
-      showLoadingOverlay('Sampling', message || 'Please wait…', { cancellable: false });
-    }
+    var chip = document.getElementById('dt-sampling-chip');
+    if (!chip) return;
+    chip.textContent = message || 'Sampling';
+    chip.hidden = false;
   }
 
   function hideSamplingOverlay() {
     _samplingOverlayPhase = null;
-    if (typeof hideLoadingOverlay === 'function') {
-      hideLoadingOverlay();
-    }
+    var chip = document.getElementById('dt-sampling-chip');
+    if (!chip) return;
+    chip.hidden = true;
+    chip.textContent = '';
   }
 
   function applySamplingPhaseEvent(type) {
     if (type === 'SAMPLE-COLLECT') {
       if (_samplingOverlayPhase === 'collect') return;
       _samplingOverlayPhase = 'collect';
-      showSamplingOverlay('Collecting sample…');
+      showSamplingOverlay('Collecting sample');
     } else if (type === 'SAMPLE-FLUSH') {
       if (_samplingOverlayPhase === 'flush') return;
       _samplingOverlayPhase = 'flush';
-      showSamplingOverlay('Flushing sample…');
+      showSamplingOverlay('Flushing');
     } else if (type === 'AIR-CLEAN') {
       if (_samplingOverlayPhase === 'air') return;
       _samplingOverlayPhase = 'air';
-      showSamplingOverlay('Air cleaning…');
+      showSamplingOverlay('Air cleaning');
     } else if (type === 'SAMPLE-CYCLE-DONE' || type === 'AIR-CLEAN-DONE') {
       hideSamplingOverlay();
     }
@@ -378,6 +439,7 @@
       dt.preheating = false;
       dt.preheatDone = false;
       dt.preparingStart = false;
+      dt._displayedStepIndex = null;
       dt._aborting = false;
       if (typeof _dtClearThermalFlags === 'function') _dtClearThermalFlags();
       if (typeof _dtSetControlsIdle === 'function') _dtSetControlsIdle();
@@ -485,7 +547,8 @@
       st.runStatus === 'RUNNING' ||
       st.runStatus === 'PAUSED' ||
       st.runStatus === 'POWER_RESUME_PENDING' ||
-      st.runStatus === 'FINALIZING'
+      st.runStatus === 'FINALIZING' ||
+      st.runStatus === 'REFLUSHING'
     ));
     if (serverLive) {
       _runEndedApplied = false;
@@ -502,6 +565,7 @@
     } else if (dt) {
       // Ignore timers/recipe from a finished run — they overwrote new Quick/Load sessions.
       if (serverLive) {
+        var prevStepIndex = dt._displayedStepIndex;
         if (st.stepIndex != null) dt.stepIndex = st.stepIndex;
         if (st.remainingSecInStep != null) dt.remainingSec = st.remainingSecInStep;
         if (st.setSecInStep != null) {
@@ -509,12 +573,23 @@
         } else if (!(parseInt(dt.setSec, 10) > 0) && dt.steps && dt.steps[dt.stepIndex]) {
           dt.setSec = parseInt(dt.steps[dt.stepIndex].durationSeconds, 10) || dt.setSec || 0;
         }
-        if (st.runStatus === 'RUNNING' || st.runStatus === 'FINALIZING') {
+        if (st.runStatus === 'RUNNING' || st.runStatus === 'FINALIZING' || st.runStatus === 'REFLUSHING') {
           dt.running = st.runStatus === 'RUNNING';
           dt.paused = false;
         } else if (st.runStatus === 'PAUSED') {
           dt.running = true;
           dt.paused = true;
+        }
+        if (st.stepIndex != null && st.stepIndex !== prevStepIndex) {
+          var liveStep = dt.steps && dt.steps[dt.stepIndex];
+          if (liveStep && typeof _dtSetText === 'function') {
+            var rpmLabel = (typeof _dtFormatRpm === 'function')
+              ? _dtFormatRpm(liveStep.rpm)
+              : String(liveStep.rpm != null ? liveStep.rpm : '--');
+            _dtSetText('dt-rpm', rpmLabel);
+          }
+          if (typeof _dtSyncEquipVisuals === 'function') _dtSyncEquipVisuals();
+          dt._displayedStepIndex = st.stepIndex;
         }
       } else if (st.runStatus === 'ABORTED' || st.runStatus === 'COMPLETE') {
         dt.running = false;
@@ -532,7 +607,7 @@
         window._dissoServerRunActive = false;
       }
     }
-    if (st.preheatReady && dt && dt.needsPreheat && !dt.running && !dt.paused && !dt.preheatDone) {
+    if (st.preheatReady && dt && dt.preheating && dt.needsPreheat && !dt.running && !dt.paused && !dt.preheatDone) {
       if (typeof window.applyPreheatDoneFromEsp === 'function') {
         window.applyPreheatDoneFromEsp({ type: 'PRE-DONE', source: 'server-state' });
       }
@@ -562,6 +637,7 @@
         if (typeof _dtSetStatus === 'function') {
           if (rs === 'running') _dtSetStatus('Test running… Step ' + ((st.stepIndex || 0) + 1) + '/' + (st.stepCount || '?'), 'running');
           else if (rs === 'paused') _dtSetStatus('Test paused', 'paused');
+          else if (rs === 'reflushing') _dtSetStatus('Reflushing…', 'running');
           else if (rs === 'finalizing') _dtSetStatus('Saving report…', 'running');
           else if (rs !== 'complete' && rs !== 'aborted') _dtSetStatus(st.runStatus, rs);
         }
@@ -571,6 +647,9 @@
       _dtUpdateProgress();
     }
     applyLiveTempsToUi(st.temps || {});
+    if (typeof window.syncReflushLockFromState === 'function') {
+      window.syncReflushLockFromState(st);
+    }
     if (st.runStatus === 'COMPLETE' || st.runStatus === 'ABORTED') {
       applyDissolutionRunEndedFromServer(st);
     }

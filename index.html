@@ -7,7 +7,7 @@
     <meta name="viewport"
         content="width=1024, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dissolution Tester</title>
-    <link rel="stylesheet" href="styles.css?v=103">
+    <link rel="stylesheet" href="styles.css?v=106">
 </head>
 
 <body>
@@ -119,6 +119,14 @@
     </div>
 
     <!-- Generic loading overlay (export progress, long-running ops) -->
+    <div id="reflush-overlay" class="modal-overlay reflush-overlay" style="display: none;" aria-live="polite">
+        <div class="role-modal reflush-modal">
+            <h3 id="reflush-title">Reflushing</h3>
+            <p id="reflush-message" class="section-subtitle">Please wait. Do not leave this screen.</p>
+            <div id="reflush-timer" class="reflush-timer" aria-label="Reflushing countdown">04:00</div>
+            <p class="reflush-sub">The report opens when this finishes.</p>
+        </div>
+    </div>
     <div id="app-loading-overlay" class="modal-overlay" style="display: none;">
         <div class="role-modal app-loading-modal">
             <h3 id="app-loading-title">Working...</h3>
@@ -366,8 +374,8 @@
                             </div>
                             <div class="form-group">
                                 <label for="quick-rinse-volume">Flush Volume</label>
-                                <input type="number" id="quick-rinse-volume" class="input-field decimal-input"
-                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                <input type="text" id="quick-rinse-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true"
                                     placeholder="0 if none"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
@@ -429,6 +437,7 @@
                                         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
                                     </div>
                                     <div class="dt-panel-title">Step Timer</div>
+                                    <span id="dt-sampling-chip" class="dt-sampling-chip" hidden>Sampling</span>
                                 </div>
                                 <div class="dt-timer-content">
                                     <div class="dt-timer-label">Current Step</div>
@@ -758,8 +767,8 @@
                             </div>
                             <div class="form-group">
                                 <label for="recipe-rinse-volume">Flush Volume</label>
-                                <input type="number" id="recipe-rinse-volume" class="input-field decimal-input"
-                                    inputmode="decimal" data-decimal-input="true" min="0" step="0.1"
+                                <input type="text" id="recipe-rinse-volume" class="input-field decimal-input"
+                                    inputmode="decimal" data-decimal-input="true"
                                     placeholder="0 if none"
                                     onfocus="if(typeof openOSKForInput === 'function') openOSKForInput(this)">
                             </div>
@@ -801,7 +810,7 @@
                         <div id="create-recipe-steps-list" class="dissolution-steps-list"></div>
 
                         <div class="add-member-actions members-actions-row" style="margin-top: 24px;">
-                            <button type="button" class="btn btn-primary" onclick="saveDissolutionRecipe()">Save Recipe</button>
+                            <button type="button" class="btn btn-primary" id="save-dissolution-recipe-btn" onclick="saveDissolutionRecipe()">Save Recipe</button>
                         </div>
                     </div>
                 </div>
@@ -2376,7 +2385,7 @@
                                     <label>Password</label>
                                     <button type="button" class="btn btn-blue btn-block" id="profile-edit-password-btn" onclick="openProfilePasswordResetPage()">Edit Password</button>
                                 </div>
-                                <div class="form-group full-width" id="profile-register-fingerprint-wrap">
+                                <div class="form-group full-width" id="profile-register-fingerprint-wrap" style="display:none" hidden>
                                     <label>Fingerprint</label>
                                     <button type="button" class="btn btn-blue btn-block" id="profile-register-fingerprint-btn" onclick="openOwnBiometricEnroll()">Register Fingerprint</button>
                                 </div>
@@ -2783,12 +2792,12 @@
         </main>
     </div>
     <div id="keyboard-root"></div>
-    <script src="keyboard.js?v=5"></script>
+    <script src="keyboard.js?v=6"></script>
     <script src="input-focus.js?v=1"></script>
     <script src="touch-scroll.js?v=1"></script>
     <script src="rbac.js?v=9"></script>
-    <script src="disso_client.js?v=20"></script>
-    <script src="script.js?v=130"></script>
+    <script src="disso_client.js?v=23"></script>
+    <script src="script.js?v=136"></script>
     <script src="validation_suite.js?v=2"></script>
 </body>
 

@@ -165,9 +165,8 @@
         var isPasswordField = currentInput.type === 'password';
 
         if (key === 'back') {
-            // Backspace
-            var val = currentInput.value;
-            currentInput.value = val.substring(0, val.length - 1);
+            var val = _oskReadValue();
+            _oskCommitText(val.substring(0, val.length - 1));
             updatePopup();
         } else if (key === 'enter') {
             // Enter - close keyboard
@@ -191,16 +190,17 @@
             buildKeyboard();
         } else {
             // Regular key
+            var next = _oskReadValue();
             if (_inputWantsDecimalKeyboard(currentInput) || String(currentInput.type || '').toLowerCase() === 'number') {
                 var allowDecimal = _inputWantsDecimalKeyboard(currentInput) || _numberInputAllowsDecimalStep(currentInput);
                 if (key === '.' || key === ',') {
-                    if (!allowDecimal || currentInput.value.indexOf('.') >= 0) return;
+                    if (!allowDecimal || next.indexOf('.') >= 0) return;
                     key = '.';
                 } else if (!/^\d$/.test(key)) {
                     return;
                 }
             }
-            currentInput.value += key;
+            _oskCommitText(next + key);
             updatePopup();
 
             // Auto-disable shift after typing (but not caps lock)
@@ -267,7 +267,7 @@
         if (!popup || !valueEl || !labelEl) return;
 
         var isPasswordField = currentInput.type === 'password';
-        var displayValue = currentInput.value;
+        var displayValue = _oskReadValue();
 
         // Show asterisks for password fields
         if (isPasswordField && displayValue) {
@@ -279,6 +279,34 @@
 
         // Update value display
         valueEl.textContent = displayValue || '';
+    }
+
+    /** type=number drops a trailing '.' and clears the field. Keep the typed text. */
+    function _oskReadValue() {
+        if (!currentInput) return '';
+        if (currentInput._oskDraft != null) return String(currentInput._oskDraft);
+        return String(currentInput.value || '');
+    }
+
+    function _oskCommitText(next) {
+        if (!currentInput) return;
+        var el = currentInput;
+        var text = next == null ? '' : String(next);
+        el._oskDraft = text;
+        el._oskWriting = true;
+        if (String(el.type || '').toLowerCase() === 'number' && /[.]/.test(text)) {
+            try { el.type = 'text'; } catch (eType) { /* ignore */ }
+            el.setAttribute('inputmode', 'decimal');
+            el.setAttribute('data-decimal-input', 'true');
+            el.classList.add('decimal-input');
+        }
+        el.value = text;
+        if (String(el.value) !== text) {
+            try { el.type = 'text'; } catch (eType2) { /* ignore */ }
+            el.setAttribute('inputmode', 'decimal');
+            el.value = text;
+        }
+        el._oskWriting = false;
     }
 
     function _inputWantsDecimalKeyboard(inputElement) {
@@ -302,6 +330,7 @@
         if (!inputElement) return;
 
         currentInput = inputElement;
+        currentInput._oskDraft = String(inputElement.value || '');
 
         if (_inputWantsDecimalKeyboard(inputElement) || String(inputElement.type || '').toLowerCase() === 'number') {
             numbersActive = true;
@@ -355,6 +384,14 @@
 
             // Sync popup when input value changes (from physical keyboard or OSK)
             currentInput._oskInputListener = function () {
+                if (!currentInput || currentInput._oskWriting) return;
+                var live = String(currentInput.value || '');
+                var draft = currentInput._oskDraft != null ? String(currentInput._oskDraft) : live;
+                if (draft !== live && /\.$/.test(draft)) {
+                    _oskCommitText(draft);
+                } else {
+                    currentInput._oskDraft = live;
+                }
                 updatePopup();
             };
             currentInput.addEventListener('input', currentInput._oskInputListener);
@@ -399,6 +436,10 @@
                 currentInput.removeEventListener('keydown', currentInput._oskKeydownListener);
                 currentInput._oskKeydownListener = null;
             }
+            if (currentInput._oskDraft != null && String(currentInput.value || '') !== String(currentInput._oskDraft)) {
+                _oskCommitText(currentInput._oskDraft);
+            }
+            currentInput._oskDraft = null;
             currentInput.blur();
             currentInput = null;
         }

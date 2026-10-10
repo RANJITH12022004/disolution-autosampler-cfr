@@ -1330,27 +1330,70 @@ function updateProfileFromCurrentUser(user) {
     }
     var bioWrap = document.getElementById('profile-register-fingerprint-wrap');
     if (bioWrap) {
-        bioWrap.style.display = (typeof biometricEnabledSetting === 'undefined' || biometricEnabledSetting) ? '' : 'none';
+        bioWrap.style.display = 'none';
+        bioWrap.hidden = true;
     }
 }
 
+function _openMemberListForFingerprint() {
+    window._biometricReturnPage = 'manage-members';
+    goToPage('manage-members');
+    if (typeof loadMembersAndRender === 'function') loadMembersAndRender();
+}
+
+function _isFactoryProfileSession(userObj) {
+    var u = userObj || window.currentUser || {};
+    if (typeof isFactorySessionUser === 'function' && isFactorySessionUser(u)) return true;
+    var role = String(u.role || '').toLowerCase();
+    if (!role && typeof getCurrentRole === 'function') role = String(getCurrentRole() || '').toLowerCase();
+    if (role === 'factory') return true;
+    return String(u.username || '').trim().toUpperCase() === String(FACTORY_USERNAME || 'RLERLT').toUpperCase();
+}
+
+function _sessionRoleLower() {
+    var u = window.currentUser || {};
+    var role = String(u.role || '').toLowerCase();
+    if (!role && typeof getCurrentRole === 'function') role = String(getCurrentRole() || '').toLowerCase();
+    return role;
+}
+
+function _isFactoryUsername(username) {
+    return String(username || '').trim().toUpperCase() === String(FACTORY_USERNAME || 'RLERLT').toUpperCase();
+}
+
+function _isOwnUsername(username) {
+    var u = window.currentUser || {};
+    var cur = String(u.username || '').trim().toLowerCase();
+    var tgt = String(username || '').trim().toLowerCase();
+    return !!(cur && tgt && cur === tgt);
+}
+
+function _sessionCanManageProfiles() {
+    if (_isFactoryProfileSession()) return false;
+    if (_sessionRoleLower() === 'admin') return true;
+    var u = window.currentUser;
+    return !!(u && typeof canPerformAction === 'function' && canPerformAction(u, 'user-manage', 'edit'));
+}
+
+function _canAdminEnrollMember(username) {
+    if (typeof biometricEnabledSetting !== 'undefined' && !biometricEnabledSetting) return false;
+    if (!_sessionCanManageProfiles()) return false;
+    if (_isFactoryUsername(username) || _isOwnUsername(username)) return false;
+    return !!String(username || '').trim();
+}
+
+function _biometricEnrollDeniedMessage(username) {
+    if (_isOwnUsername(username)) return 'You cannot register your own fingerprint.';
+    if (_isFactoryUsername(username)) return 'Factory cannot have a fingerprint. Factory signs in with a password.';
+    if (_isFactoryProfileSession()) return 'Factory cannot register fingerprints.';
+    return 'Only an Admin or a profile manager can register a fingerprint for another member.';
+}
+
 function openOwnBiometricEnroll() {
-    if (!biometricEnabledSetting) {
-        showAppModal('Biometric enrollment is disabled by Factory Settings.', 'Biometric Disabled');
-        return;
-    }
-    var user = window.currentUser || {};
-    var username = String(user.username || user.name || '').trim();
-    if (!username) {
-        showAppModal('No user logged in.', 'Register Fingerprint');
-        return;
-    }
-    _populateMemberBiometricSummary({
-        name: user.name || username,
-        username: username,
-        role: user.role || ''
-    });
-    goToPage('member-biometric');
+    showAppModal(
+        'Only an Admin or a profile manager can register a fingerprint for another member.',
+        'Register Fingerprint'
+    );
 }
 
 function apiRequest(path, options) {
@@ -2113,6 +2156,29 @@ function userCanApproveTestReport() {
     return role === 'admin' || role === 'supervisor';
 }
 
+/** Recipe disable approval uses the same QA-or-Admin rule as recipe approval. */
+function _approvalVerifyModalOptionsForRecipeDisable() {
+    var hasQa = typeof window._activeQaCount === 'number' && window._activeQaCount >= 1;
+    if (hasQa) {
+        return {
+            purpose: 'recipe_disable',
+            titleText: 'Recipe disable approval',
+            subtitleText: 'A QA user must verify before this recipe can be disabled.',
+            usernameLabelText: 'QA username',
+            usernamePlaceholder: 'Enter QA username',
+            emptyCredentialsMessage: 'Enter QA username and password.'
+        };
+    }
+    return {
+        purpose: 'recipe_disable',
+        titleText: 'Recipe disable approval',
+        subtitleText: 'No active QA users. An admin must verify to disable this recipe.',
+        usernameLabelText: 'Admin username',
+        usernamePlaceholder: 'Enter admin username',
+        emptyCredentialsMessage: 'Enter admin username and password.'
+    };
+}
+
 /** Recipe approval modal copy; server allows QA only when QA exists, else Admin only. */
 function _approvalVerifyModalOptionsForRecipe() {
     var hasQa = typeof window._activeQaCount === 'number' && window._activeQaCount >= 1;
@@ -2417,6 +2483,7 @@ function performAutoLogoutDueToInactivity() {
 function showLoginScreen() {
     _auditActivePage = null;
     _auditViewLogPending = false;
+    if (document.body) document.body.classList.remove('factory-session');
     var login = document.getElementById('page-login');
     var app = document.querySelector('.app-container');
     if (app) app.style.display = 'none';
@@ -2598,27 +2665,7 @@ function cancelProfilePasswordReset() {
 }
 
 function _offerSelfBiometricAfterPasswordChange() {
-    if (!biometricEnabledSetting) {
-        goToPage('user-profile');
-        return;
-    }
-    var user = window.currentUser || {};
-    var ask = (typeof showConfirmModal === 'function')
-        ? showConfirmModal('Register or replace your fingerprint now?', 'Register Fingerprint')
-        : Promise.resolve(false);
-    ask.then(function (ok) {
-        if (!ok) {
-            goToPage('user-profile');
-            return;
-        }
-        if (typeof openOwnBiometricEnroll === 'function') {
-            openOwnBiometricEnroll();
-            return;
-        }
-        goToPage('user-profile');
-    }).catch(function () {
-        goToPage('user-profile');
-    });
+    goToPage('user-profile');
 }
 
 function submitProfilePasswordChange() {
@@ -2853,10 +2900,12 @@ function updateSettingsVisibility() {
         });
     });
 
-    var factoryCard = document.querySelector('.settings-factory');
-    if (factoryCard) {
-        factoryCard.style.display = String(role || '').toLowerCase() === 'factory' ? '' : 'none';
-    }
+    var factoryOnly = _isFactoryProfileSession(u) || String(role || '').toLowerCase() === 'factory';
+    if (document.body) document.body.classList.toggle('factory-session', !!factoryOnly);
+    document.querySelectorAll('.settings-factory, .settings-reset').forEach(function (card) {
+        card.hidden = !factoryOnly;
+        card.style.display = factoryOnly ? '' : 'none';
+    });
 }
 
 /** Hide sidebar / home tiles the current user cannot access (RBAC). */
@@ -3017,8 +3066,7 @@ function goToPage(pageName) {
         return;
     }
     if (pageName === 'factory-settings') {
-        var role = (typeof getCurrentRole === 'function') ? getCurrentRole() : null;
-        if (String(role || '').toLowerCase() !== 'factory') {
+        if (!_isFactoryProfileSession()) {
             showAppModal('Only Factory user can access Factory Settings.', 'Permission');
             pageName = 'settings';
         }
@@ -3039,6 +3087,21 @@ function goToPage(pageName) {
         }
         if (typeof checkNavigationAccess === 'function' && !checkNavigationAccess(pageName)) {
             showAppModal('You do not have permission to open this screen.', 'Permission');
+            return;
+        }
+    }
+    if (pageName === 'member-biometric') {
+        var enrollTarget = (typeof _getBiometricEnrollUsername === 'function') ? _getBiometricEnrollUsername() : '';
+        if (typeof _canAdminEnrollMember !== 'function' || !_canAdminEnrollMember(enrollTarget)) {
+            var denyMsg = (typeof _biometricEnrollDeniedMessage === 'function')
+                ? _biometricEnrollDeniedMessage(enrollTarget)
+                : 'Only an Admin can register a fingerprint for another member.';
+            var denyDest = window._biometricReturnPage && window._biometricReturnPage !== 'member-biometric'
+                ? window._biometricReturnPage
+                : 'manage-members';
+            window._biometricReturnPage = null;
+            showAppModal(denyMsg, 'Register Fingerprint');
+            goToPage(denyDest);
             return;
         }
     }
@@ -3903,8 +3966,13 @@ function enrollMemberBiometric() {
         return;
     }
     var username = _getBiometricEnrollUsername();
-    if (!username) {
-        showAppModal('No member selected for fingerprint enrollment. Save the member first.', 'Register Fingerprint');
+    if (!_canAdminEnrollMember(username)) {
+        var deniedDest = window._biometricReturnPage && window._biometricReturnPage !== 'member-biometric'
+            ? window._biometricReturnPage
+            : 'manage-members';
+        window._biometricReturnPage = null;
+        showAppModal(_biometricEnrollDeniedMessage(username), 'Register Fingerprint');
+        goToPage(deniedDest);
         return;
     }
     _biometricEnrollUsername = username;
@@ -3994,7 +4062,10 @@ function enrollMemberBiometric() {
         hideBiometricProgressOverlay();
         _addMemberLastSavedId = null;
         showAppModal('Fingerprint enrolled successfully.', 'Register Fingerprint');
-        goToPage('user-profile');
+        var enrolledDest = window._biometricReturnPage || 'manage-members';
+        window._biometricReturnPage = null;
+        goToPage(enrolledDest);
+        if (enrolledDest === 'manage-members' && typeof loadMembersAndRender === 'function') loadMembersAndRender();
     }).catch(function (err) {
         if (_biometricEnrollCancelled) return;
         hideBiometricProgressOverlay();
@@ -4708,7 +4779,16 @@ function continueCreateRecipeToSteps() {
     goToPage('create-recipe-step2');
 }
 
+var _recipeSaveInFlight = false;
+
+function _setRecipeSaveBusy(busy) {
+    _recipeSaveInFlight = !!busy;
+    var btn = document.getElementById('save-dissolution-recipe-btn');
+    if (btn) btn.disabled = !!busy;
+}
+
 function saveDissolutionRecipe() {
+    if (_recipeSaveInFlight) return;
     var validated = validateCreateRecipeStep1Fields();
     if (!validated) {
         goToPage('create-recipe-step1');
@@ -4796,10 +4876,12 @@ function saveDissolutionRecipe() {
     var url = editId ? (API_BASE + '/api/data/recipes/' + editId) : (API_BASE + '/api/data/recipes');
     var method = editId ? 'PUT' : 'POST';
 
+    _setRecipeSaveBusy(true);
     apiRequest(url, {
         method: method,
         body: recipe
     }).then(function (result) {
+        _setRecipeSaveBusy(false);
         window._createRecipeDraft = null;
         window.currentEditingRecipeId = null;
         window._createRecipeStepPrefill = null;
@@ -4829,6 +4911,7 @@ function saveDissolutionRecipe() {
             goToLoadRecipeAfterSave();
         }
     }).catch(function (err) {
+        _setRecipeSaveBusy(false);
         var msg = (err && err.message) ? String(err.message) : 'Unknown error';
         showAppModal('Failed to save recipe: ' + msg, 'Save Recipe');
     });
@@ -6615,6 +6698,74 @@ function enableMember(id) {
 // ----- Loading overlay, audit filters, USB export (DUMMY parity) -----
 var _appLoadingCancelHandler = null;
 
+var REFLUSH_LOCK_SEC = 240;
+var _reflushTimerId = null;
+
+function _formatReflushClock(sec) {
+    var n = Math.max(0, parseInt(sec, 10) || 0);
+    var mm = Math.floor(n / 60);
+    var ss = n % 60;
+    return (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
+}
+
+function hideReflushLock() {
+    if (_reflushTimerId != null) {
+        clearInterval(_reflushTimerId);
+        _reflushTimerId = null;
+    }
+    var overlay = document.getElementById('reflush-overlay');
+    if (overlay) overlay.style.display = 'none';
+    window._reflushLockVisible = false;
+}
+
+/** Full-screen countdown, same role as LeakTest "Releasing pressure". */
+function showReflushLock(totalSec) {
+    return new Promise(function (resolve) {
+        hideReflushLock();
+        var total = parseInt(totalSec, 10);
+        if (isNaN(total) || total < 1) total = REFLUSH_LOCK_SEC;
+        var left = total;
+        var overlay = document.getElementById('reflush-overlay');
+        var timerEl = document.getElementById('reflush-timer');
+        if (timerEl) timerEl.textContent = _formatReflushClock(left);
+        if (overlay) overlay.style.display = 'flex';
+        window._reflushLockVisible = true;
+        _reflushTimerId = setInterval(function () {
+            left -= 1;
+            if (timerEl) timerEl.textContent = _formatReflushClock(left);
+            if (left <= 0) {
+                hideReflushLock();
+                resolve();
+            }
+        }, 1000);
+    });
+}
+
+/** Server-driven countdown while runStatus is REFLUSHING. */
+function syncReflushLockFromState(st) {
+    var status = st ? String(st.runStatus || '').toUpperCase() : '';
+    if (status !== 'REFLUSHING') {
+        if (window._reflushLockVisible) hideReflushLock();
+        return;
+    }
+    var rem = parseInt(st.reflushRemainingSec, 10);
+    if (isNaN(rem)) rem = REFLUSH_LOCK_SEC;
+    var overlay = document.getElementById('reflush-overlay');
+    var timerEl = document.getElementById('reflush-timer');
+    if (timerEl) timerEl.textContent = _formatReflushClock(rem);
+    if (overlay) overlay.style.display = 'flex';
+    window._reflushLockVisible = true;
+    if (!window._dissoCompletionBeepPlayed) {
+        window._dissoCompletionBeepPlayed = true;
+        if (typeof window.kioskBeep === 'function') {
+            try { window.kioskBeep('long'); } catch (e) { /* ignore */ }
+        }
+    }
+}
+window.syncReflushLockFromState = syncReflushLockFromState;
+window.showReflushLock = showReflushLock;
+window.hideReflushLock = hideReflushLock;
+
 function showLoadingOverlay(title, message, options) {
     var opts = options || {};
     if (!opts.auditLoading && typeof clearAuditTrailsLoadingTimers === 'function') {
@@ -8363,8 +8514,10 @@ function userCanEnableRecipe(userObj) {
     return typeof canPerformAction === 'function' && canPerformAction(u, 'recipe-enable', 'change');
 }
 
-function disableRecipe(id) {
-    apiRequest(API_BASE + '/api/data/recipes/' + id, { method: 'DELETE' }).then(function () {
+function _finishDisableRecipe(id, token) {
+    var headers = {};
+    if (token) headers['X-Approval-Verify-Token'] = token;
+    return apiRequest(API_BASE + '/api/data/recipes/' + id, { method: 'DELETE', headers: headers }).then(function () {
         try {
             var disabled = _getDisabledRecipesFromStorage();
             var recipe = null;
@@ -8385,6 +8538,26 @@ function disableRecipe(id) {
 
         loadManageRecipes();
         showAppModal('Recipe disabled.', 'Disable Recipe');
+    }).catch(function (err) {
+        var msg = (err && err.message) ? err.message : 'Failed to disable recipe.';
+        showAppModal(msg, 'Disable Recipe');
+    });
+}
+
+function disableRecipe(id) {
+    var role = (typeof getCurrentRole === 'function' ? String(getCurrentRole() || '').toLowerCase() : '');
+    var isFactory = role === 'factory' ||
+        (typeof isFactorySessionUser === 'function' && isFactorySessionUser(window.currentUser));
+    if (isFactory) {
+        _finishDisableRecipe(id, null);
+        return;
+    }
+    var ready = (typeof refreshActiveQaCount === 'function') ? refreshActiveQaCount() : Promise.resolve();
+    ready.then(function () {
+        return openApprovalVerifyModal(_approvalVerifyModalOptionsForRecipeDisable());
+    }).then(function (token) {
+        if (!token) return;
+        return _finishDisableRecipe(id, token);
     }).catch(function (err) {
         var msg = (err && err.message) ? err.message : 'Failed to disable recipe.';
         showAppModal(msg, 'Disable Recipe');
@@ -8923,113 +9096,9 @@ function loadDisableRecipes() {
 }
 
 function completeRecipeFromStep2() {
-    // Read from Step 1
-    var nameEl = document.getElementById('recipe-product-name');
-    var productName = nameEl && nameEl.value ? nameEl.value.trim() : '';
-
-    var mode = getCreateUspMode();
-    var speedRadio = document.querySelector('input[name="create-speed"]:checked');
-    var heightRadio = document.querySelector('input[name="create-height"]:checked');
-    var speed = speedRadio ? parseInt(speedRadio.value, 10) || 300 : null;
-    var dropHeight = heightRadio ? parseFloat(heightRadio.value) || 14 : null;
-    if (mode === 'USP') {
-        speed = 25;
-        dropHeight = 14;
-    }
-
-    // Cylinder (from step 3 if chosen; default 100 ml)
-    var cylinderRadio = document.querySelector('input[name="create-cylinder"]:checked');
-    var cylinderVolume = cylinderRadio ? parseFloat(cylinderRadio.value) || 100 : 100;
-
-    var stepCount = (typeof window.currentRecipeStepCount === 'number' && window.currentRecipeStepCount > 0)
-        ? window.currentRecipeStepCount
-        : 10;
-
-    if (!productName || speed == null || dropHeight == null) {
-        showAppModal('Please complete recipe name, speed and height before saving.', 'Save Recipe');
-        return;
-    }
-
-    var taps = window._createRecipeStepTaps;
-    if (!taps || taps.length !== stepCount) {
-        taps = computeCreateRecipeStepTapsForStepCount(stepCount);
-    }
-    if (mode === 'CUSTOM' && !taps) {
-        showAppModal('Invalid custom tap total for this step count.', 'Save Recipe');
-        return;
-    }
-    if (!taps || taps.length !== stepCount) {
-        taps = computeStandardUspTaps(stepCount);
-    }
-
-    var steps = [];
-    for (var i = 0; i < stepCount; i++) {
-        steps.push({
-            speed: speed,
-            dropHeight: dropHeight,
-            tapCount: taps[i]
-        });
-    }
-
-    var uspLabel = mode === 'USP' ? 'USP' : 'Custom';
-    var recipe = {
-        productName: productName,
-        steps: steps,
-        stepCount: stepCount,
-        cylinder: { volume: cylinderVolume },
-        createdAt: new Date().toISOString(),
-        speed: speed,
-        dropHeight: dropHeight,
-        usp: uspLabel,
-        uspMode: mode
-    };
-    if (mode === 'CUSTOM') {
-        var totalEl = document.getElementById('create-custom-total-taps');
-        var ct = totalEl ? parseInt(totalEl.value, 10) : 0;
-        if (!isNaN(ct) && ct > 0) recipe.customTotalTaps = ct;
-        else {
-            var s2 = 0;
-            for (var ti = 0; ti < taps.length; ti++) s2 += parseInt(taps[ti], 10) || 0;
-            recipe.customTotalTaps = s2;
-        }
-    }
-    var editId = window.currentEditingRecipeId;
-    if (editId) {
-        recipe.id = editId;
-    }
-
-    var url = editId ? (API_BASE + '/api/data/recipes/' + editId) : (API_BASE + '/api/data/recipes');
-    var method = editId ? 'PUT' : 'POST';
-    apiRequest(url, {
-        method: method,
-        body: recipe
-    }).then(function (result) {
-        window.currentEditingRecipeId = null;
-        var rid = (result && result.id != null) ? result.id : ((result && result.recipe && result.recipe.id != null) ? result.recipe.id : null);
-        goToPage('manage-recipes');
-        loadManageRecipes();
-        if (rid != null) {
-            var role = (typeof getCurrentRole === 'function' ? String(getCurrentRole() || '').toLowerCase() : '');
-            if (role === 'factory') {
-                showAppModal('Recipe saved and approved.', 'Save Recipe');
-            } else {
-                setTimeout(function () {
-                    approveSavedRecipeWithCredentials(rid, 'Save Recipe', '').then(function (res) {
-                        if (res && res.cancelled) {
-                            showAppModal('Recipe saved. It stays pending until a QA or Admin approves it.', 'Save Recipe');
-                        }
-                    });
-                }, 50);
-            }
-        } else {
-            showAppModal('Recipe saved, but approval could not be started (missing recipe id).', 'Save Recipe');
-        }
-    }).catch(function (err) {
-        console.error('Failed to save recipe:', err);
-        var msg = (err && err.message) ? String(err.message) : 'Unknown error';
-        showAppModal('Failed to save recipe: ' + msg, 'Save Recipe');
-    });
+    saveDissolutionRecipe();
 }
+
 function getValidationTickIntervalMs() {
     if (validationHardwareEnabled) return 30;
     return Math.max(200, Math.round(60000 / VALIDATION_USP_RPM));
@@ -9514,11 +9583,10 @@ function _setAddMemberPageMode(isEdit, isSelfEdit) {
     if (confirmPwdLabel) confirmPwdLabel.textContent = isEdit ? 'Confirm New Password (optional)' : 'Confirm Password';
     if (roleContainer) roleContainer.style.display = isSelfEdit ? 'none' : '';
     if (bioBtn) {
-        if (isEdit && biometricEnabledSetting) {
-            bioBtn.classList.remove('is-hidden');
-        } else {
-            bioBtn.classList.add('is-hidden');
-        }
+        var editUsername = userIdEl && userIdEl.value ? userIdEl.value.trim() : '';
+        var showBio = !!(isEdit && typeof _canAdminEnrollMember === 'function' && _canAdminEnrollMember(editUsername) && !isSelfEdit);
+        if (showBio) bioBtn.classList.remove('is-hidden');
+        else bioBtn.classList.add('is-hidden');
     }
     if (isSelfEdit) {
         var panel = document.getElementById('add-member-permissions-panel');
@@ -9747,23 +9815,15 @@ function openEditMemberBiometricEnroll() {
         showAppModal('Biometric enrollment is disabled by Factory Settings.', 'Biometric Disabled');
         return;
     }
-    var memberId = editingMemberId;
-    if (memberId == null) {
-        showAppModal('Open Edit Profile for a member first.', 'Register Fingerprint');
+    var userIdEl = document.getElementById('add-userid');
+    var username = userIdEl && userIdEl.value ? userIdEl.value.trim() : '';
+    if (!_canAdminEnrollMember(username)) {
+        showAppModal(_biometricEnrollDeniedMessage(username), 'Register Fingerprint');
         return;
     }
     var fullNameEl = document.getElementById('add-fullname');
-    var userIdEl = document.getElementById('add-userid');
     var roleHidden = document.getElementById('selected-role');
-    var username = userIdEl && userIdEl.value ? userIdEl.value.trim() : '';
-    if (!username) {
-        showAppModal('Member User ID is missing.', 'Register Fingerprint');
-        return;
-    }
-    if (username.toUpperCase() === FACTORY_USERNAME) {
-        showAppModal('The Factory account itself cannot have a fingerprint. Enroll biometrics for other profiles from Edit Profile.', 'Register Fingerprint');
-        return;
-    }
+    window._biometricReturnPage = 'add-member';
     _populateMemberBiometricSummary({
         name: fullNameEl && fullNameEl.value ? fullNameEl.value.trim() : '',
         username: username,
@@ -9831,7 +9891,9 @@ function saveNewMember() {
                 id: data.id, name: fullName, username: username, role: role
             };
             _clearAddMemberForm();
-            if (biometricEnabledSetting) {
+            var savedUsername = savedMember.username || username;
+            if (biometricEnabledSetting && _canAdminEnrollMember(savedUsername)) {
+                window._biometricReturnPage = 'manage-members';
                 _populateMemberBiometricSummary(savedMember);
                 goToPage('member-biometric');
             } else {
@@ -10641,6 +10703,10 @@ function saveFactorySettings() {
 }
 
 function showFactoryResetConfirm() {
+    if (!_isFactoryProfileSession()) {
+        showAppModal('Only Factory can reset this machine.', 'Factory Reset');
+        return;
+    }
     showConfirmModal(
         'Are you sure you want to factory reset? This will permanently delete all reports, recipes, and users. This action cannot be undone.',
         'Factory Reset'
@@ -10797,12 +10863,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function skipMemberBiometricEnrollment() {
     _addMemberLastSavedId = null;
-    goToPage('user-profile');
+    var dest = window._biometricReturnPage || 'user-profile';
+    window._biometricReturnPage = null;
+    goToPage(dest);
+    if (dest === 'manage-members' && typeof loadMembersAndRender === 'function') loadMembersAndRender();
 }
 
 function backToMemberAfterBiometric() {
     _addMemberLastSavedId = null;
-    goToPage('user-profile');
+    var dest = window._biometricReturnPage || 'user-profile';
+    window._biometricReturnPage = null;
+    goToPage(dest);
+    if (dest === 'manage-members' && typeof loadMembersAndRender === 'function') loadMembersAndRender();
 }
 
 function _populateMemberBiometricSummary(member) {
@@ -13185,7 +13257,7 @@ function dissolutionPreheatStart() {
         : null;
     function onPreheatDone() {
         var live = _dissolutionTest;
-        if (!live || live.preheatDone) return;
+        if (!live || !live.preheating || live.preheatDone) return;
         live.preheating = false;
         live.preheatDone = true;
         live.heaterForcedOn = true;
@@ -13334,6 +13406,7 @@ function initDissolutionTestRun(recipe, opts) {
     _dtStopTimer();
     _dtClearShaftTimers();
     window._lastOpenedEndedReportId = null;
+    window.applyPreheatDoneFromEsp = function () {};
     recipe = recipe || {};
     _dissolutionTest = {
         recipe: recipe,
@@ -14192,9 +14265,26 @@ function _dtOnStepComplete() {
     var fillEl = _dtEl('dt-progress-fill');
     if (pctEl) pctEl.textContent = '100%';
     if (fillEl) fillEl.style.width = '100%';
-    _dtSetStatus('Test completed', 'done');
+    _dtSetStatus('Reflushing…', 'done');
     if (typeof _dtCloseReturnableSession === 'function') _dtCloseReturnableSession();
-    _dtSaveCompletionReport({ aborted: false });
+    var testSec = 0;
+    if (dt.testStartTime) {
+        var nowIso = typeof getDisplayedKioskDateTimeIso === 'function' ? getDisplayedKioskDateTimeIso() : new Date().toISOString();
+        testSec = Math.max(0, Math.floor((new Date(nowIso).getTime() - new Date(dt.testStartTime).getTime()) / 1000));
+    }
+    var reflushSec = (typeof REFLUSH_LOCK_SEC === 'number') ? REFLUSH_LOCK_SEC : 240;
+    var afterReflush = function () {
+        _dtSaveCompletionReport({ aborted: false, testDurationSec: testSec, reflushSec: reflushSec });
+    };
+    if (window._dissoServerRunActive) {
+        // Server owns the 4-minute reflush lock and writes the report when it ends.
+        return;
+    }
+    if (typeof showReflushLock === 'function') {
+        showReflushLock(reflushSec).then(afterReflush);
+    } else {
+        afterReflush();
+    }
 }
 
 function _dtBuildStepResults(isAborted) {
@@ -14234,8 +14324,8 @@ function _dtBuildCompletionReportPayload(opts) {
     if (recipe.media) detailParts.push('Media: ' + recipe.media);
     if (recipe.mediaVolume) detailParts.push('Media volume: ' + recipe.mediaVolume);
     if (recipe.mediaPh != null) detailParts.push('Media pH: ' + recipe.mediaPh);
-    if (recipe.sampleVolume) detailParts.push('Sample: ' + recipe.sampleVolume);
-    if (recipe.rinseVolume) detailParts.push('Rinse: ' + recipe.rinseVolume);
+    if (recipe.sampleVolume != null && String(recipe.sampleVolume).trim() !== '') detailParts.push('Sample: ' + recipe.sampleVolume);
+    if (recipe.rinseVolume != null && String(recipe.rinseVolume).trim() !== '') detailParts.push('Rinse: ' + recipe.rinseVolume);
     if (recipe.batchSize) detailParts.push('Batch size: ' + recipe.batchSize);
     if (recipe.arNumber) detailParts.push('AR: ' + recipe.arNumber);
     if (recipe.replenishment != null) detailParts.push('Replenishment: ' + recipe.replenishment);
@@ -14276,7 +14366,10 @@ function _dtBuildCompletionReportPayload(opts) {
             printIntervalSec: parseInt(dt.printIntervalSec, 10) || 0,
             stepCount: dt.steps.length,
             completedSteps: completedSteps,
-            durationSeconds: elapsed,
+            testDurationSec: (opts.testDurationSec != null && !isNaN(opts.testDurationSec)) ? opts.testDurationSec : elapsed,
+            reflushDurationSec: (!isAborted && opts.reflushSec) ? opts.reflushSec : 0,
+            durationSeconds: ((opts.testDurationSec != null && !isNaN(opts.testDurationSec)) ? opts.testDurationSec : elapsed)
+                + ((!isAborted && opts.reflushSec) ? opts.reflushSec : 0),
             testStartTime: dt.testStartTime || (typeof subtractSecondsFromIso === 'function' ? subtractSecondsFromIso(nowIso, elapsed) : nowIso),
             testEndTime: nowIso,
             status: isAborted ? 'aborted' : 'completed',

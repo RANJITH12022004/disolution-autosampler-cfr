@@ -883,6 +883,19 @@ def _session_has_internal(internal_key: str) -> bool:
     return rbac_service.member_has_internal(m, internal_key)
 
 
+def _require_factory_session():
+    """Factory profile only (role factory or username RLERLT)."""
+    err = _require_auth()
+    if err:
+        return err
+    user = data_service.get_current_user() or {}
+    role = str(user.get("role") or "").strip().lower()
+    un = str(user.get("username") or "").strip().upper()
+    if role == "factory" or un == data_service.FACTORY_USERNAME.upper():
+        return None
+    return jsonify({"error": "Forbidden. Factory role required."}), 403
+
+
 def _try_restore_session_from_request_headers() -> bool:
     """Rehydrate bridge session when the UI still has a user after service restart."""
     if data_service.get_current_user():
@@ -1273,6 +1286,9 @@ def _consume_approval_verify_token(expected_purpose, required_feature=None):
     elif exp == "recipe":
         if not _verifier_payload_has_internal(payload, "recipe-approve"):
             return None, "Verifier does not have recipe approval permission."
+    elif exp == "recipe_disable":
+        if not _verifier_payload_has_internal(payload, "recipe-approve"):
+            return None, "Verifier does not have recipe approval permission."
     elif exp == "user_admin":
         if not _verifier_payload_has_internal(payload, "user-manage"):
             return None, "Verifier does not have profile management permission."
@@ -1330,11 +1346,11 @@ def _format_recipe_audit_details(recipe: dict, recipe_id=None) -> str:
         parts.append("media volume {} mL".format(mv))
     if r.get("mediaPh") is not None and str(r.get("mediaPh")).strip() != "":
         parts.append("media pH {}".format(r.get("mediaPh")))
-    sv = str(r.get("sampleVolume") or "").strip()
-    if sv:
+    sv = "" if r.get("sampleVolume") is None else str(r.get("sampleVolume")).strip()
+    if sv != "":
         parts.append("sample volume {} mL".format(sv))
-    rv = str(r.get("rinseVolume") or "").strip()
-    if rv:
+    rv = "" if r.get("rinseVolume") is None else str(r.get("rinseVolume")).strip()
+    if rv != "":
         parts.append("rinse volume {} mL".format(rv))
     if r.get("powerFailure") is not None and str(r.get("powerFailure")).strip() != "":
         parts.append("power failure {} min".format(r.get("powerFailure")))
@@ -1571,14 +1587,31 @@ def delete_recipe(recipe_id):
         if gate:
             return gate
         existing = data_service.get_recipe(recipe_id)
+        if not existing:
+            return jsonify({"error": "Recipe not found"}), 404
+        cur = data_service.get_current_user() or {}
+        session_un = _norm_username(cur.get("username") or cur.get("name"))
+        if _effective_request_role() == "factory":
+            verifier_username = (
+                (request.headers.get("X-User-Username") or "").strip()
+                or (cur.get("username") or "").strip()
+                or (cur.get("name") or "").strip()
+                or "Factory"
+            )
+        else:
+            verified, verify_err = _consume_approval_verify_token("recipe_disable")
+            if verify_err:
+                return jsonify({"error": verify_err}), 403
+            verifier_username = (verified.get("username") or verified.get("name") or "").strip()
+            if session_un and _norm_username(verifier_username) == session_un:
+                return jsonify({"error": "You cannot approve your own recipe disable."}), 403
         success = data_service.delete_recipe(recipe_id)
         if success:
-            rlabel = ""
-            if existing:
-                rlabel = existing.get("productName") or existing.get("name") or ""
+            rlabel = existing.get("productName") or existing.get("name") or ""
             details = "Recipe id {}".format(recipe_id)
             if rlabel:
                 details = "{}: {}".format(details, rlabel)
+            details = "{} | verified by {}".format(details, verifier_username or "--")
             _audit(None, None, "Disable Recipe", details)
             return jsonify({"success": True}), 200
         return jsonify({"error": "Recipe not found"}), 404
@@ -2373,6 +2406,9 @@ def get_factory_settings():
 @app.route("/api/data/factory-settings", methods=["POST"])
 def save_factory_settings():
     try:
+        gate = _require_factory_session()
+        if gate:
+            return gate
         settings = request.get_json(force=True, silent=True) or {}
         data_service.save_factory_settings(settings)
         _audit(None, None, "Factory settings changed", "")
@@ -2538,9 +2574,9 @@ def wakeup_schedule():
 @app.route("/api/data/factory-reset", methods=["POST"])
 def factory_reset():
     try:
-        user = data_service.get_current_user()
-        if not user or (user.get("role") or "").strip().lower() != "factory":
-            return jsonify({"error": "Forbidden. Factory role required."}), 403
+        gate = _require_factory_session()
+        if gate:
+            return gate
 
         data_service.delete_session_power_audit_pending()
         result = data_service.factory_reset()
@@ -3034,6 +3070,49 @@ def mandatory_password_reset():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _purge_factory_biometric_template(scanned_template_id=None):
+    """Clear a Factory fingerprint link and delete only that sensor template.
+
+    Returns True when the scanned template was the Factory template and no member
+    owns it, so the caller must reject the login or verification.
+    """
+    factory = data_service.get_factory_biometric_record() or {}
+    ft = factory.get("fingerprintTemplateId")
+    try:
+        factory_tid = int(ft) if ft not in (None, "") else None
+    except (TypeError, ValueError):
+        factory_tid = None
+    try:
+        scanned = int(scanned_template_id) if scanned_template_id not in (None, "") else None
+    except (TypeError, ValueError):
+        scanned = None
+    if factory_tid is None or factory_tid <= 0:
+        if scanned is None:
+            return False
+        member = data_service.get_member_by_fingerprint_template(scanned)
+        un = str((member or {}).get("username") or "").strip().upper()
+        if un == data_service.FACTORY_USERNAME.upper() or int((member or {}).get("id") or -1) == 0:
+            data_service.clear_factory_biometric()
+            return True
+        return False
+    member_owns = False
+    for m in data_service.list_members() or []:
+        try:
+            mt = m.get("fingerprintTemplateId")
+            if mt not in (None, "") and int(mt) == factory_tid:
+                member_owns = True
+                break
+        except (TypeError, ValueError):
+            continue
+    data_service.clear_factory_biometric()
+    if not member_owns:
+        try:
+            biometric_service.delete_template(factory_tid)
+        except Exception:
+            app.logger.exception("Failed to delete factory fingerprint template %s", factory_tid)
+    return scanned == factory_tid and not member_owns
+
+
 @app.route("/api/data/auth/login-biometric", methods=["POST"])
 def login_biometric():
     try:
@@ -3046,7 +3125,22 @@ def login_biometric():
             return jsonify({"error": identified.get("error") or "Fingerprint not recognized"}), 401
 
         template_id = identified.get("templateId")
+        if _purge_factory_biometric_template(template_id):
+            _audit_event(
+                action="Biometric login",
+                outcome="denied",
+                entity_type="session",
+                entity_name="biometric",
+                details="Factory biometric login is not allowed",
+                target_user=data_service.FACTORY_USERNAME,
+                extra={"templateId": template_id},
+            )
+            return jsonify({"error": "Factory biometric login is not allowed."}), 403
         member = data_service.get_member_by_fingerprint_template(template_id)
+        member_un = str((member or {}).get("username") or "").strip().upper()
+        if member and (member_un == data_service.FACTORY_USERNAME.upper() or int(member.get("id") or -1) == 0):
+            data_service.clear_factory_biometric()
+            return jsonify({"error": "Factory biometric login is not allowed."}), 403
         if not member:
             return jsonify({"error": "Fingerprint is not linked to any member account"}), 404
 
@@ -3220,8 +3314,8 @@ def approval_verify():
         payload = request.get_json(force=True, silent=True) or {}
         method = str(payload.get("method") or "credentials").strip().lower()
         purpose = str(payload.get("purpose") or "recipe").strip().lower()
-        if purpose not in ("recipe", "report", "user_admin", "export"):
-            return jsonify({"ok": False, "error": "purpose must be recipe, report, or user_admin"}), 400
+        if purpose not in ("recipe", "report", "user_admin", "export", "recipe_disable"):
+            return jsonify({"ok": False, "error": "purpose must be recipe, report, user_admin, export, or recipe_disable"}), 400
         verifier = None
         username = (payload.get("username") or "").strip()
 
@@ -3258,7 +3352,13 @@ def approval_verify():
                 )
                 return jsonify({"ok": False, "error": identified.get("error") or "Fingerprint not recognized"}), 401
             template_id = identified.get("templateId")
+            if _purge_factory_biometric_template(template_id):
+                return jsonify({"ok": False, "error": "Factory biometric cannot be used for verification."}), 403
             member = data_service.get_member_by_fingerprint_template(template_id)
+            member_un = str((member or {}).get("username") or "").strip().upper()
+            if member and (member_un == data_service.FACTORY_USERNAME.upper() or int(member.get("id") or -1) == 0):
+                data_service.clear_factory_biometric()
+                return jsonify({"ok": False, "error": "Factory biometric cannot be used for verification."}), 403
             if not member:
                 _audit_event(
                     action="Approval verification",
@@ -3319,6 +3419,26 @@ def approval_verify():
             eligible = _approval_verifier_eligible_for_report(verifier, report_type)
         elif purpose == "recipe":
             eligible = _approval_verifier_eligible_for_recipe(verifier)
+        elif purpose == "recipe_disable":
+            eligible = _approval_verifier_eligible_for_recipe(verifier)
+            if eligible and _effective_request_role() != "factory":
+                cur = data_service.get_current_user() or {}
+                session_un = _norm_username(cur.get("username") or cur.get("name"))
+                verifier_un = _norm_username(verifier.get("username") or username)
+                if session_un and verifier_un and session_un == verifier_un:
+                    _audit_event(
+                        action="Approval verification",
+                        outcome="denied",
+                        entity_type="verification",
+                        entity_name=purpose,
+                        details="Logged-in user cannot approve their own recipe disable",
+                        target_user=verifier.get("username") or username,
+                        extra={"purpose": purpose, "method": method},
+                    )
+                    return jsonify({
+                        "ok": False,
+                        "error": "You cannot approve your own recipe disable.",
+                    }), 403
         else:
             eligible = _approval_verifier_eligible_for_user_admin(verifier)
         if not eligible:
@@ -4948,11 +5068,7 @@ def biometric_status():
 
 
 def _require_biometric_enroll_permission(username: str):
-    """Allow enroll for self (including Factory), profile admin, or Factory for others.
-
-    Factory may register its own fingerprint (stored in factory settings) and may
-    enroll fingerprints for other member profiles.
-    """
+    """Admin or profile management may enroll another active member. Never self. Never Factory."""
     err = _require_auth()
     if err:
         return err
@@ -4960,24 +5076,29 @@ def _require_biometric_enroll_permission(username: str):
     cur = data_service.get_current_user() or {}
     cur_un = str(cur.get("username") or "").strip()
     cur_role = str(cur.get("role") or "").strip().lower()
-    is_factory_actor = (
-        cur_un.upper() == data_service.FACTORY_USERNAME.upper() or cur_role == "factory"
-    )
     target = str(username or "").strip()
     if not target:
         return jsonify({"ok": False, "error": "username is required"}), 400
-    # Factory self-enroll is allowed (only Factory actor).
+    # Reject Factory before resolve_enroll_target / link_factory_biometric.
     if target.upper() == data_service.FACTORY_USERNAME.upper():
-        if is_factory_actor:
-            return None
-        return jsonify({"ok": False, "error": "Only the Factory account can enroll Factory biometric."}), 403
+        return jsonify({"ok": False, "error": "Factory cannot be enrolled."}), 403
+    is_factory_actor = (
+        cur_un.upper() == data_service.FACTORY_USERNAME.upper() or cur_role == "factory"
+    )
     if is_factory_actor:
-        return None
+        return jsonify({"ok": False, "error": "Factory cannot enroll fingerprints."}), 403
+    can_manage = cur_role == "admin" or _session_has_internal("user-manage")
+    if not can_manage:
+        return jsonify({"ok": False, "error": "Only an Admin or a profile manager can register a fingerprint for another member."}), 403
     if cur_un.lower() == target.lower():
-        return None
-    if _session_has_internal("user-manage"):
-        return None
-    return jsonify({"ok": False, "error": "Forbidden. You do not have permission to enroll biometric for this user."}), 403
+        return jsonify({"ok": False, "error": "You cannot register your own fingerprint."}), 403
+    member = data_service.get_member_by_username(target)
+    if not member:
+        return jsonify({"ok": False, "error": "Member not found for the provided username"}), 404
+    status = str(member.get("status") or "active").strip().lower()
+    if status != "active":
+        return jsonify({"ok": False, "error": "Member account is not active"}), 403
+    return None
 
 
 def _link_fingerprint_after_enroll(member: dict, template_id: int, before_member: dict, username: str) -> dict:
@@ -4988,16 +5109,14 @@ def _link_fingerprint_after_enroll(member: dict, template_id: int, before_member
         if prev_un.upper() != str(username or "").strip().upper():
             data_service.clear_biometric_link_for_record(previous_owner)
 
-    is_factory_target = str(username or "").strip().upper() == data_service.FACTORY_USERNAME.upper()
-    if is_factory_target:
-        linked = data_service.link_factory_biometric(template_id)
-    else:
-        member["fingerprintTemplateId"] = template_id
-        member["biometricEnrollmentStatus"] = "enrolled"
-        member["biometricEnrolledAt"] = int(time.time())
-        member["biometricEnabled"] = True
-        data_service.save_member(member)
-        linked = data_service.get_member(member.get("id")) or member
+    if str(username or "").strip().upper() == data_service.FACTORY_USERNAME.upper():
+        raise ValueError("Factory cannot be enrolled.")
+    member["fingerprintTemplateId"] = template_id
+    member["biometricEnrollmentStatus"] = "enrolled"
+    member["biometricEnrolledAt"] = int(time.time())
+    member["biometricEnabled"] = True
+    data_service.save_member(member)
+    linked = data_service.get_member(member.get("id")) or member
 
     _delete_previous_biometric_template_after_replace(before_member, template_id, username)
     return linked
@@ -5471,11 +5590,24 @@ def _disso_save_report_from_run(run: dict, aborted: bool = False):
             "printIntervalSec": int(run.get("printIntervalSec") or td.get("printIntervalSec") or 0),
             "status": "aborted" if aborted else "completed",
             "abortReason": run.get("abortReason"),
+            "testDurationSec": int(run.get("testDurationSec") or run.get("elapsedSec") or 0),
+            "reflushDurationSec": 0 if aborted else int(run.get("reflushDurationSec") or 0),
             "operatorTrail": operators,
             "testStartTime": run.get("startedAtRtc"),
             "testEndTime": run.get("completedAtRtc"),
         }
     )
+    try:
+        test_sec = int(td.get("testDurationSec") or 0)
+    except (TypeError, ValueError):
+        test_sec = 0
+    try:
+        reflush_sec = int(td.get("reflushDurationSec") or 0)
+    except (TypeError, ValueError):
+        reflush_sec = 0
+    td["testDurationSec"] = max(0, test_sec)
+    td["reflushDurationSec"] = max(0, reflush_sec)
+    td["durationSeconds"] = td["testDurationSec"] + td["reflushDurationSec"]
     if run.get("remarks") and not td.get("remarks"):
         td["remarks"] = run.get("remarks")
     payload = {

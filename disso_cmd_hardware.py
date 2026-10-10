@@ -56,13 +56,23 @@ _sim = {
 }
 
 _preheat_ready = False
+_preheat_armed = False
 _preheat_ready_lock = threading.Lock()
 
 
 def clear_preheat_ready() -> None:
-    global _preheat_ready
+    global _preheat_ready, _preheat_armed
     with _preheat_ready_lock:
         _preheat_ready = False
+        _preheat_armed = False
+
+
+def _arm_preheat_watch() -> None:
+    """Accept PRE-DONE only after this run's #PRE-HEAT* was sent."""
+    global _preheat_ready, _preheat_armed
+    with _preheat_ready_lock:
+        _preheat_ready = False
+        _preheat_armed = True
 
 
 def is_preheat_ready() -> bool:
@@ -73,6 +83,8 @@ def is_preheat_ready() -> bool:
 def _mark_preheat_ready() -> None:
     global _preheat_ready
     with _preheat_ready_lock:
+        if not _preheat_armed:
+            return
         _preheat_ready = True
 
 
@@ -386,6 +398,38 @@ def _should_retry_tx(result: Dict[str, Any]) -> bool:
     return True
 
 
+def _error_matches_expect(inner: str, expect_prefix: Optional[Union[str, Sequence[str]]]) -> bool:
+    """True when this error frame is the answer to the command being waited for.
+
+    A leftover bath NRCP from an earlier STOP-TEST must not fail RPM/DUR/FL.
+    NRCP while waiting for START-TEST or PRE-HEAT is that command's real failure.
+    """
+    if not proto.is_error_response(inner):
+        return False
+    if not expect_prefix:
+        return True
+    upper = (inner or "").upper()
+    prefixes = (expect_prefix,) if isinstance(expect_prefix, str) else tuple(expect_prefix or ())
+    tokens = []
+    for raw in prefixes:
+        token = str(raw or "").upper().rstrip(",").rstrip("*")
+        if token:
+            tokens.append(token)
+    for token in tokens:
+        if token in upper:
+            return True
+    recipe_tokens = ("RPM", "DUR", "SML", "FL", "SET-TEMP", "TS-", "MDV", "AUTO-DROP", "RECIPE")
+    if "RCP" in upper and "NRCP" not in upper:
+        for token in tokens:
+            if any(token.startswith(name) or name in token for name in recipe_tokens):
+                return True
+    if "NRCP" in upper:
+        for token in tokens:
+            if token.startswith("START-TEST") or token.startswith("PRE-HEAT") or token.startswith("STOP-TEST"):
+                return True
+    return False
+
+
 def _ack_matches(inner: str, expect_prefix: Optional[Union[str, Sequence[str]]] = None) -> bool:
     if not expect_prefix:
         return proto.is_ack(inner)
@@ -437,9 +481,14 @@ def _tx_once(
         except queue.Empty:
             continue
         if proto.is_error_response(inner):
-            # Recipe protocol rejects must not be swallowed as generic TX errors mid-wait
-            # when they are ERR,RCP — still return so caller can fail fast.
-            return {"ok": False, "error": inner, "tx": frame, "ack": inner}
+            # Fail only when this error names the command we are waiting for.
+            # A leftover bath NRCP from an idle STOP-TEST must not poison START-TEST
+            # or a recipe frame. ERR,RCP still fails recipe frames immediately.
+            if _error_matches_expect(inner, expect_prefix):
+                return {"ok": False, "error": inner, "tx": frame, "ack": inner}
+            if _is_async_completion(inner):
+                _defer_ack(inner)
+            continue
         if expect_prefix:
             if _ack_matches(inner, expect_prefix):
                 return {"ok": True, "tx": frame, "ack": inner}
@@ -715,6 +764,18 @@ def _wait_for_recipe_complete(timeout: float = 5.0) -> Dict[str, Any]:
     return {"ok": False, "error": "RECIPE,ACK timeout"}
 
 
+def _recipe_flush_is_zero(recipe: Dict[str, Any]) -> bool:
+    raw = None if not isinstance(recipe, dict) else recipe.get("rinseVolume")
+    if raw is None and isinstance(recipe, dict):
+        raw = recipe.get("flushVolume")
+    if raw is None:
+        return False
+    try:
+        return float(raw) == 0.0
+    except (TypeError, ValueError):
+        return str(raw).strip() in ("0", "0.0", "0.00")
+
+
 def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_sec_in_step: Optional[int] = None) -> Dict[str, Any]:
     """
     Recipe load order:
@@ -756,9 +817,15 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
             res = _tx(frame, wait_ack=True, timeout=4.0, expect_prefix=expect)
             results.append(res)
             if not res.get("ok"):
+                err = res.get("error") or "recipe upload failed at frame " + str(frame)
+                if _recipe_flush_is_zero(recipe) and ("RCP" in str(err).upper() or str(expect) == "FL"):
+                    err = (
+                        "Bath firmware rejected flush volume 0 ({}). "
+                        "Software sent the flush as 0."
+                    ).format(err)
                 return {
                     "ok": False,
-                    "error": res.get("error") or "recipe upload failed at frame " + str(frame),
+                    "error": err,
                     "results": results,
                     "failedFrame": frame,
                     "failedIndex": i,
@@ -794,9 +861,15 @@ def upload_recipe(recipe: Dict[str, Any], from_step_index: int = 0, remaining_se
                 recipe_ack = _wait_for_recipe_complete(timeout=4.0)
         results.append(recipe_ack)
         if not recipe_ack.get("ok"):
+            err = recipe_ack.get("error") or "RECIPE,ACK missing"
+            if _recipe_flush_is_zero(recipe) and ("RCP" in str(err).upper() or "timeout" in str(err).lower()):
+                err = (
+                    "Bath firmware did not accept flush volume 0 ({}). "
+                    "Software sent #FL with 0 mL."
+                ).format(err)
             return {
                 "ok": False,
-                "error": recipe_ack.get("error") or "RECIPE,ACK missing",
+                "error": err,
                 "results": results,
                 "failedFrame": "RECIPE",
             }
@@ -828,6 +901,8 @@ def _wait_for_pre_done(timeout: float = 120.0) -> Dict[str, Any]:
         upper = (inner or "").upper()
         if "PRE-DONE" in upper:
             return {"ok": True, "done": True, "ack": inner}
+        if "NRCP" in upper:
+            return {"ok": False, "error": inner, "ack": inner, "done": False, "errorCode": "no_recipe"}
         if proto.is_error_response(inner) and "PRE" in upper:
             return {"ok": False, "error": inner, "ack": inner, "done": False}
         if _is_async_completion(inner):
@@ -852,6 +927,7 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
     """
     _drain_pending(0.1)
     clear_preheat_ready()
+    _arm_preheat_watch()
     res = _tx(proto.build_pre_heat(), timeout=5.0, expect_prefix="PRE-HEAT")
     ack = str(res.get("ack") or res.get("error") or "")
     ack_u = ack.upper()
@@ -887,6 +963,23 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
         "waitingDone": bool(wait_done),
     }
     if not wait_done:
+        # The master ESP ACKs PRE-HEAT locally before the bath answers. A bath
+        # with no recipe then sends NRCP. Catch that before the UI enables Start.
+        late = _drain_pending(0.45)
+        for item in late:
+            iu = (item or "").upper()
+            if "NRCP" in iu:
+                return {
+                    "ok": False,
+                    "error": (
+                        "No recipe is loaded on the bath controller. "
+                        "Wait for recipe prepare to complete successfully, then try Preheat again."
+                    ),
+                    "errorCode": "no_recipe",
+                    "ack": item,
+                }
+            if _is_async_completion(item):
+                _defer_ack(item)
         return out
 
     done = _wait_for_pre_done(timeout=timeout)
@@ -898,6 +991,14 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
     if done.get("ok") is False:
         out["ok"] = False
         out["error"] = done.get("error")
+        if done.get("errorCode"):
+            out["errorCode"] = done.get("errorCode")
+        elif "NRCP" in str(done.get("error") or done.get("ack") or "").upper():
+            out["errorCode"] = "no_recipe"
+            out["error"] = (
+                "No recipe is loaded on the bath controller. "
+                "Wait for recipe prepare to complete successfully, then try Preheat again."
+            )
     return out
 
 

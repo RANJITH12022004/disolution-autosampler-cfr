@@ -2470,6 +2470,40 @@ def system_network_addresses():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _sysinfo_temp_ok(value):
+    if value is None or value == "":
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return number == number
+
+
+def _sysinfo_probe_label(bath):
+    """Bath probe present means the float switch and heater sensor are reporting."""
+    return "Working" if _sysinfo_temp_ok(bath) else "Fault"
+
+
+def _sysinfo_pump_label(test_st):
+    status = str((test_st or {}).get("runStatus") or "").upper()
+    thermal = status in ("RUNNING", "PAUSED", "REFLUSHING", "FINALIZING")
+    try:
+        thermal = thermal or bool(disso_cmd_hardware.circulation_is_on())
+    except Exception:
+        pass
+    return "On" if thermal else "Off"
+
+
+def _sysinfo_collector_label(bath):
+    if not _sysinfo_temp_ok(bath):
+        return "Fault"
+    try:
+        return disso_cmd_hardware.sample_collector_label()
+    except Exception:
+        return "Idle"
+
+
 @app.route("/api/system/info", methods=["GET"])
 def system_info():
     try:
@@ -2496,16 +2530,7 @@ def system_info():
         if not isinstance(statues, dict):
             statues = {}
 
-        hw = {}
-        try:
-            hw = hardware_service.cmd_system_info() or {}
-        except Exception as hw_err:
-            app.logger.warning("system info legacy status: %s", hw_err)
-            hw = {"ok": False, "error": str(hw_err)}
-
         bath = live.get("bath")
-        if bath is None:
-            bath = hw.get("bath_c")
 
         machine_state = statues.get("state") or test_st.get("runStatus") or "IDLE"
         if not test_st.get("active") and not statues.get("state"):
@@ -2529,14 +2554,12 @@ def system_info():
             ),
             "stepTotal": statues.get("stepTotal") or test_st.get("stepCount"),
             "remainingTime": statues.get("remainingTime"),
-            "float_switch": hw.get("float_switch") or "—",
-            "heater_sensor": hw.get("heater_sensor") or "—",
-            "pump": hw.get("pump") or "—",
-            "sample_collector": hw.get("sample_collector") or "—",
+            "float_switch": _sysinfo_probe_label(bath),
+            "heater_sensor": _sysinfo_probe_label(bath),
+            "pump": _sysinfo_pump_label(test_st),
+            "sample_collector": _sysinfo_collector_label(bath),
             "simulate": bool(live.get("simulate")),
         }
-        if hw.get("error") and not hw.get("ok") and not hw.get("placeholder"):
-            out["legacyStatusError"] = hw.get("error")
         return jsonify(out), 200
     except Exception as e:
         app.logger.exception("Error getting system info")

@@ -2988,6 +2988,7 @@ function goToPage(pageName) {
         _shaftDisarmEventsPoll();
     }
     if (prevPage === 'system-info' && pageName !== 'system-info' && pageName !== 'vessel-temperature') {
+        if (typeof stopSystemInfoPoll === 'function') stopSystemInfoPoll();
         if (typeof window.dissoDisarmAutoTemp === 'function') {
             window.dissoDisarmAutoTemp('leave-system-info');
         }
@@ -12072,8 +12073,12 @@ function applySystemInfoData(data) {
 
 function loadSystemInfo() {
     setSystemInfoLoading();
+    _fetchSystemInfo(true);
+}
+
+function _fetchSystemInfo(showError) {
     if (typeof apiRequest !== 'function') {
-        applySystemInfoData({ error: 'API unavailable' });
+        if (showError) applySystemInfoData({ error: 'API unavailable' });
         return;
     }
     apiRequest(API_BASE + '/api/system/info', { method: 'GET' })
@@ -12081,14 +12086,33 @@ function loadSystemInfo() {
             applySystemInfoData(data || {});
         })
         .catch(function (err) {
+            if (!showError) return;
             applySystemInfoData({
                 error: (err && err.message) ? err.message : 'Unable to load system info'
             });
         });
 }
 
+var _sysinfoPollTimer = null;
+
+function stopSystemInfoPoll() {
+    if (_sysinfoPollTimer) {
+        clearInterval(_sysinfoPollTimer);
+        _sysinfoPollTimer = null;
+    }
+}
+
 function initSystemInfoPage() {
     loadSystemInfo();
+    stopSystemInfoPoll();
+    _sysinfoPollTimer = setInterval(function () {
+        var page = document.getElementById('page-system-info');
+        if (!page || !page.classList.contains('active')) {
+            stopSystemInfoPoll();
+            return;
+        }
+        _fetchSystemInfo(false);
+    }, 2000);
     if (typeof window.dissoArmAutoTemp === 'function') {
         window.dissoArmAutoTemp('system-info');
     }

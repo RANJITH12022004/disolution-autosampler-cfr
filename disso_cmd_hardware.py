@@ -234,6 +234,27 @@ def _reader_loop() -> None:
 
 
 _last_sample_phase: Optional[str] = None
+_circulation_on = False
+
+
+def circulation_is_on() -> bool:
+    """True after a successful PRE-HEAT until STOP-PRE-HEAT."""
+    return bool(_circulation_on)
+
+
+def _set_circulation(on: bool) -> None:
+    global _circulation_on
+    _circulation_on = bool(on)
+
+
+def sample_collector_label() -> str:
+    """Working while a collect / flush / air-clean phase is active, otherwise Idle."""
+    phase = str(_last_sample_phase or "").upper()
+    if phase in ("SAMPLE-COLLECT", "SAMPLE-FLUSH", "AIR-CLEAN"):
+        return "Working"
+    if "ERR" in phase or phase in ("FAULT", "ERROR"):
+        return "Fault"
+    return "Idle"
 
 
 def _emit_sample_phase(phase: str, raw: str) -> None:
@@ -980,6 +1001,7 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
                 }
             if _is_async_completion(item):
                 _defer_ack(item)
+        _set_circulation(True)
         return out
 
     done = _wait_for_pre_done(timeout=timeout)
@@ -999,6 +1021,8 @@ def pre_heat(timeout: float = 120.0, wait_done: bool = True) -> Dict[str, Any]:
                 "No recipe is loaded on the bath controller. "
                 "Wait for recipe prepare to complete successfully, then try Preheat again."
             )
+    if out.get("ok"):
+        _set_circulation(True)
     return out
 
 
@@ -1064,6 +1088,7 @@ def stop_heater() -> Dict[str, Any]:
     res = _tx(proto.build_stop_heat(), timeout=5.0, expect_prefix="STOP-PRE-HEAT")
     if res.get("ok"):
         res["heater"] = "off"
+        _set_circulation(False)
     return res
 
 

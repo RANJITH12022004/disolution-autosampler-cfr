@@ -185,6 +185,9 @@ var SCREEN_FEATURE_MAP = {
   'add-member': 'user-add',
   'locked-members': 'user-manage',
   'disabled-members': 'user-manage',
+  'manage-user-groups': 'user-manage',
+  'disabled-user-groups': 'user-manage',
+  'edit-user-group': 'user-manage',
   'disable-recipes': 'disable-recipes',
   'member-biometric': 'profile',
   'password-expired-reset': 'profile',
@@ -193,6 +196,8 @@ var SCREEN_FEATURE_MAP = {
 var ACTION_FEATURE_MAP = {
   'add-member': 'user-add',
   'edit-member': 'user-manage',
+  'manage-user-groups': 'user-manage',
+  'edit-user-group': 'user-manage',
   'delete-member': 'user-delete',
   'unlock-member': 'user-unlock',
   'enable-member': 'user-enable',

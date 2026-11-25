@@ -11955,3 +11955,19 @@ body.keyboard-open {
 .quick-test-uart-panel summary {
     font-weight: 600;
 }
+
+.settings-user-groups {
+    background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
+    color: #fff !important;
+}
+.settings-user-groups:hover {
+    background: linear-gradient(135deg, #818cf8, #6366f1) !important;
+}
+.settings-user-groups .settings-icon,
+.settings-user-groups .settings-icon svg,
+.settings-user-groups h3 {
+    color: #fff !important;
+}
+.permission-card.is-locked {
+    cursor: default;
+}
